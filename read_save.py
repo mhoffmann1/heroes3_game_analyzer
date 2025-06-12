@@ -3,6 +3,7 @@ import json
 import os
 import h3sed
 import re
+import math
 
 # Hero-to-faction mapping (expanded for Horn of the Abyss)
 HERO_FACTION_MAP = {
@@ -64,9 +65,8 @@ def parse_game_info(mapdata):
     # Parse mapdata['desc'] for map name and other details
     desc_data = mapdata.get("desc", "")
     if desc_data:
-        # Extract map name (e.g., from "Map created by...")
+        # Extract map name
         try:
-            # Use template name as map name
             map_name_match = re.search(r'Template was 8XM8 Huge from pack Original template pack', desc_data)
             if map_name_match:
                 game_info["map_name"] = "8XM8 Huge"
@@ -113,7 +113,25 @@ def parse_game_info(mapdata):
     
     return game_info
 
-def extract_hero_stats(save):
+def calculate_army_strength(army, attack_skill, defense_skill, ai_values):
+    """Calculate army strength: sum(AI_Value * count) * H, where H = sqrt((1 + 0.05 * A) * (1 + 0.05 * D))."""
+    # Calculate hero strength (H)
+    H = math.sqrt((1 + 0.05 * attack_skill) * (1 + 0.05 * defense_skill))
+    
+    # Sum AI Values * counts
+    total_ai_value = 0
+    for unit in army:
+        unit_name = unit.get("name", "")
+        unit_count = unit.get("count", 0)
+        ai_value = ai_values.get(unit_name, 0)  # Default to 0 if unit not found
+        if ai_value == 0:
+            print(f"Warning: AI Value not found for unit '{unit_name}'")
+        total_ai_value += ai_value * unit_count
+    
+    # Army strength = total AI Value * H
+    return round(total_ai_value * H, 2)
+
+def extract_hero_stats(save, ai_values):
     """Extract stats for all heroes in the savegame."""
     heroes = []
     try:
@@ -133,13 +151,20 @@ def extract_hero_stats(save):
                     if unit and unit.get("name")
                 ]
                 
+                # Get primary skills for army strength calculation
+                attack_skill = stats.get("attack", 0)
+                defense_skill = stats.get("defense", 0)
+                
+                # Calculate army strength
+                army_strength = calculate_army_strength(army, attack_skill, defense_skill, ai_values)
+                
                 hero_data = {
                     "name": hero_name,
                     "level": stats.get("level", 0),
                     "experience": stats.get("exp", 0),
                     "primary_skills": {
-                        "attack": stats.get("attack", 0),
-                        "defense": stats.get("defense", 0),
+                        "attack": attack_skill,
+                        "defense": defense_skill,
                         "spell_power": stats.get("power", 0),
                         "knowledge": stats.get("knowledge", 0)
                     },
@@ -150,7 +175,8 @@ def extract_hero_stats(save):
                     ],
                     "faction": hero_faction,
                     "owner": "Unknown",
-                    "army": army
+                    "army": army,
+                    "army_strength": army_strength
                 }
                 heroes.append(hero_data)
             except AttributeError as e:
@@ -180,11 +206,22 @@ def main():
     args = parser.parse_args()
 
     try:
+        # Load AI values from creature_ai_values.json
+        try:
+            with open("creature_ai_values.json", "r") as f:
+                ai_values = json.load(f)
+        except FileNotFoundError:
+            print("Error: creature_ai_values.json not found in current directory")
+            exit(1)
+        except json.JSONDecodeError:
+            print("Error: creature_ai_values.json is not a valid JSON file")
+            exit(1)
+
         # Load savegame
         save = load_savegame(args.savegame)
         
         # Extract hero stats and game info
-        data = extract_hero_stats(save)
+        data = extract_hero_stats(save, ai_values)
         
         # Save to JSON
         save_to_json(data, args.output)
