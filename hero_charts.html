@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Heroes III Hero Comparison</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        #controls {
+            margin-bottom: 20px;
+        }
+        #heroSelect {
+            width: 300px;
+            height: 100px;
+        }
+        #chartContainer {
+            max-width: 800px;
+        }
+        .checkbox-group {
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <h2>Hero Comparison</h2>
+        <label for="heroSelect">Select up to 8 heroes:</label><br>
+        <select id="heroSelect" multiple></select><br>
+        <div class="checkbox-group">
+            <label><input type="checkbox" id="toggleLevel" checked> Level</label>
+            <label><input type="checkbox" id="toggleExperience"> Experience</label>
+            <label><input type="checkbox" id="toggleArmyStrength" checked> Army Strength</label>
+            <label><input type="checkbox" id="toggleAttack" checked> Attack</label>
+            <label><input type="checkbox" id="toggleDefense" checked> Defense</label>
+            <label><input type="checkbox" id="toggleSpellPower" checked> Spell Power</label>
+            <label><input type="checkbox" id="toggleKnowledge" checked> Knowledge</label>
+        </div>
+    </div>
+    <div id="chartContainer">
+        <canvas id="heroChart"></canvas>
+    </div>
+
+    <script>
+        // Load hero data from hero_stats.json
+        async function loadHeroData() {
+            try {
+                const response = await fetch('hero_stats.json');
+                if (!response.ok) throw new Error('Failed to load hero_stats.json');
+                const data = await response.json();
+                return data.heroes || [];
+            } catch (error) {
+                console.error('Error loading hero data:', error);
+                alert('Error loading hero data. Ensure hero_stats.json is available.');
+                return [];
+            }
+        }
+
+        // Initialize chart and controls
+        async function init() {
+            const heroes = await loadHeroData();
+            if (!heroes.length) return;
+
+            // Populate hero select dropdown
+            const heroSelect = document.getElementById('heroSelect');
+            heroes.forEach(hero => {
+                const option = document.createElement('option');
+                option.value = hero.name;
+                option.textContent = hero.name;
+                heroSelect.appendChild(option);
+            });
+
+            // Limit selection to 8 heroes
+            heroSelect.addEventListener('change', () => {
+                const selected = Array.from(heroSelect.selectedOptions);
+                if (selected.length > 8) {
+                    selected.slice(8).forEach(option => option.selected = false);
+                    alert('Maximum 8 heroes can be selected.');
+                }
+                updateChart();
+            });
+
+            // Chart configuration
+            const ctx = document.getElementById('heroChart').getContext('2d');
+            const heroColors = [
+                'rgba(255, 99, 132, 0.7)',  // Red
+                'rgba(54, 162, 235, 0.7)',  // Blue
+                'rgba(75, 192, 192, 0.7)',  // Teal
+                'rgba(255, 206, 86, 0.7)',  // Yellow
+                'rgba(153, 102, 255, 0.7)', // Purple
+                'rgba(255, 159, 64, 0.7)',  // Orange
+                'rgba(199, 199, 199, 0.7)', // Gray
+                'rgba(83, 102, 255, 0.7)'   // Indigo
+            ];
+
+            const chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: []
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        title: { display: true, text: 'Hero Comparison' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ${context.raw.toLocaleString()}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            beginAtZero: true,
+                            title: { display: true, text: 'Level / Experience / Skills' }
+                        },
+                        yArmy: {
+                            type: 'linear',
+                            position: 'right',
+                            beginAtZero: true,
+                            title: { display: true, text: 'Army Strength' },
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                }
+            });
+
+            // Update chart based on selections
+            function updateChart() {
+                const selectedHeroes = Array.from(heroSelect.selectedOptions).map(opt => opt.value);
+                const heroData = heroes.filter(h => selectedHeroes.includes(h.name));
+
+                // Update labels (hero names)
+                chart.data.labels = heroData.map(h => h.name);
+
+                // Define datasets
+                const datasets = [
+                    {
+                        label: 'Level',
+                        data: heroData.map(h => h.level),
+                        backgroundColor: heroData.map((_, i) => heroColors[i % heroColors.length]),
+                        yAxisID: 'y',
+                        hidden: !document.getElementById('toggleLevel').checked
+                    },
+                    {
+                        label: 'Experience',
+                        data: heroData.map(h => h.experience), // No normalization
+                        backgroundColor: heroData.map((_, i) => heroColors[i % heroColors.length]),
+                        yAxisID: 'y',
+                        hidden: !document.getElementById('toggleExperience').checked
+                    },
+                    {
+                        label: 'Army Strength',
+                        data: heroData.map(h => h.army_strength),
+                        backgroundColor: heroData.map((_, i) => heroColors[i % heroColors.length]),
+                        yAxisID: 'yArmy',
+                        hidden: !document.getElementById('toggleArmyStrength').checked
+                    },
+                    {
+                        label: 'Attack',
+                        data: heroData.map(h => h.primary_skills.attack),
+                        backgroundColor: heroData.map((_, i) => heroColors[i % heroColors.length]),
+                        yAxisID: 'y',
+                        hidden: !document.getElementById('toggleAttack').checked
+                    },
+                    {
+                        label: 'Defense',
+                        data: heroData.map(h => h.primary_skills.defense),
+                        backgroundColor: heroData.map((_, i) => heroColors[i % heroColors.length]),
+                        yAxisID: 'y',
+                        hidden: !document.getElementById('toggleDefense').checked
+                    },
+                    {
+                        label: 'Spell Power',
+                        data: heroData.map(h => h.primary_skills.spell_power),
+                        backgroundColor: heroData.map((_, i) => heroColors[i % heroColors.length]),
+                        yAxisID: 'y',
+                        hidden: !document.getElementById('toggleSpellPower').checked
+                    },
+                    {
+                        label: 'Knowledge',
+                        data: heroData.map(h => h.primary_skills.knowledge),
+                        backgroundColor: heroData.map((_, i) => heroColors[i % heroColors.length]),
+                        yAxisID: 'y',
+                        hidden: !document.getElementById('toggleKnowledge').checked
+                    }
+                ];
+
+                chart.data.datasets = datasets;
+                chart.update();
+            }
+
+            // Add toggle event listeners
+            ['Level', 'Experience', 'ArmyStrength', 'Attack', 'Defense', 'SpellPower', 'Knowledge'].forEach(metric => {
+                document.getElementById(`toggle${metric}`).addEventListener('change', updateChart);
+            });
+
+            // Initial chart render
+            updateChart();
+        }
+
+        // Start initialization
+        init();
+    </script>
+</body>
+</html>
