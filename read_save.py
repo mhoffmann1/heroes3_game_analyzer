@@ -1,7 +1,7 @@
 import argparse
 import json
 import os
-import h3sed
+import h3tools
 import re
 import math
 
@@ -25,9 +25,9 @@ def load_savegame(file_path):
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Savegame file '{file_path}' not found.")
     try:
-        return h3sed.Savefile(file_path)
+        return h3tools.Savefile(file_path)
     except AttributeError:
-        raise ImportError("Could not find Savefile class in h3sed. Check library version or installation.")
+        raise ImportError("Could not find Savefile class in h3tool. Check library version or installation.")
 
 def parse_game_info(mapdata):
     """Parse mapdata['name'] and ['desc'] to extract game information."""
