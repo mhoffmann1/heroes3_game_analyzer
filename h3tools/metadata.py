@@ -7,7 +7,7 @@ This file is part of h3tools - Heroes3 Savegame Editor.
 Released under the MIT License.
 
 @created     22.03.2020
-@modified    09.04.2025
+@modified    16.06.2025
 ------------------------------------------------------------------------------
 """
 from collections import defaultdict, OrderedDict
@@ -18,6 +18,7 @@ import gzip
 import logging
 import os
 import re
+import struct
 import sys
 
 import h3tools
@@ -184,6 +185,7 @@ HERO_REGEX = re.compile(b"""
                              # Blank spots:   FF FF FF FF XY XY XY XY
                              # Artifacts:     XY 00 00 00 FF FF FF FF
                              # Scrolls:       XY 00 00 00 00 00 00 00
+                             # Catapult etc:  XY 00 00 00 XY XY 00 00
     (?P<equipment>(          # Catapult etc:  XY 00 00 00 XY XY 00 00
       (\xFF{4} .{4}) | (.\x00{3} (\x00{4} | \xFF{4})) | (.\x00{3}.{2}\x00{2})
     ){19})
@@ -1193,7 +1195,6 @@ for t in SPELLS:
     SCROLL_ARTIFACTS.append(n)
 
 
-
 @contextlib.contextmanager
 def patch_gzip_for_partial():
     """
@@ -1219,8 +1220,7 @@ def patch_gzip_for_partial():
 
     try: yield
     finally: readercls._read_eof = read_eof_original
-
-
+    
 
 class Savefile(object):
     """Game savefile."""
@@ -1239,6 +1239,32 @@ class Savefile(object):
 
     HEADER_TEXTS = OrderedDict([("name", 2), ("desc", 2)])  # {name in mapdata: byte length count}
 
+    TOWN_REGEX = re.compile(b"\x00{10,30}(.{4})(.{2})([^\x00]{4,20}[\x00*@?H]?)", re.DOTALL)
+    #TOWN_REGEX = re.compile(b"\x00{10,50}(.{4})(.{2})([^\x00]{1,30}[\x00*@?H]?)", re.DOTALL)
+
+    PLAYER_COLOR_MAP = {
+        0x28: "Red",
+        0xCB: "Blue",
+        0xFF: "None",
+        0x80: "Teal",
+        0x1E: "Orange",
+        0x20: "Green",
+        0x24: "Tan",
+        0x30: "Purple",
+    }
+
+    FACTION_MAP = {
+        0x00: "Inferno",
+        0x12: "Stronghold",
+        0x04: "Fortress",
+        0x08: "Tower",
+        0x1E: "Factory",
+        0x0C: "Dungeon",
+        0x24: "Dungeon",
+        0x13: "Cove",
+        0x30: "Rampart",
+        0x1C: "Castle",
+    }
 
     def __init__(self, filename, parse_heroes=True):
         self.filename = filename
@@ -1250,8 +1276,8 @@ class Savefile(object):
         self.size     = 0
         self.usize    = 0
         self.heroes   = []
+        self.towns    = []
         self.read(parse_heroes)
-
 
     def patch(self, bytes, span):
         """Patches unpacked contents with bytes from span[0] to span[1]."""
@@ -1259,13 +1285,11 @@ class Savefile(object):
         self.raw = self.raw[0:span[0]] + bytes + self.raw[span[1]:]
         self.usize = len(self.raw)
 
-
     def realize(self):
         """Validates and updates changed hero data, patches savefile unpacked contents for write."""
         heroes_changed = [h for h in self.heroes if h.is_changed()]
         for hero in heroes_changed: hero.serialize()
         for hero in self.heroes: self.patch(hero.bytes, hero.span)
-
 
     def read(self, parse_heroes=True):
         """Reads in file raw contents and main attributes."""
@@ -1274,13 +1298,14 @@ class Savefile(object):
         self.raw0 = self.raw = raw
         self.mapdata = {}
         self.heroes = []
+        self.towns = []
         self.detect_version()
         self.parse_metadata()
+        self.parse_towns()
         if parse_heroes: self.parse_heroes()
         self.update_info()
         logger.info("Opened %s (%s, unzipped %s).", self.filename,
                     util.format_bytes(self.size), util.format_bytes(self.usize))
-
 
     def write(self, filename=None):
         """Writes out gzipped file."""
@@ -1294,7 +1319,6 @@ class Savefile(object):
             if hero.is_patched(self): hero.mark_saved()
         logger.info("Saved %s (%s, unzipped %s).", filename,
                     util.format_bytes(self.size), util.format_bytes(self.usize))
-
 
     def write_ranges(self, spans, filename=None):
         """Writes out gzipped file with specified byte ranges only."""
@@ -1312,7 +1336,6 @@ class Savefile(object):
                     " and ".join("..".join(map(str, x)) for x in spans),
                     util.format_bytes(self.size), util.format_bytes(self.usize))
 
-
     def detect_version(self):
         """Auto-detects game version, raises error if savefile not recognizable."""
         RGX_MAGIC = h3tools.version.adapt("savefile_magic_regex", self.RGX_MAGIC)
@@ -1323,7 +1346,6 @@ class Savefile(object):
         if self.version in h3tools.version.VERSIONS:
             self.mapdata["game"] = h3tools.version.VERSIONS[self.version].TITLE
         logger.info("Detected %s as version %r.", self.filename, self.version)
-
 
     def parse_metadata(self):
         """Populates savefile map name and description."""
@@ -1345,12 +1367,81 @@ class Savefile(object):
                 logger.exception("Failed to parse map name and description from %s.", self.filename)
         if "game" in self.mapdata: self.mapdata["game"] = self.mapdata.pop("game") # Order last
 
+    def find_hero_section_start(self):
+        """Find the start offset of the hero section using HERO_REGEX."""
+        REGEX = h3tools.version.adapt("hero_regex", HERO_REGEX, version=self.version)
+        pos = 30000  # Start search at 0x7530
+        match = REGEX.search(self.raw[pos:])
+        if match:
+            hero_start = pos + match.start()
+            logger.debug("Hero section starts at offset 0x%08X", hero_start)
+            return hero_start
+        logger.warning("No hero section found starting from offset 0x7530")
+        return len(self.raw)  # Fallback to end of file if no heroes found
+
+    def parse_towns(self):
+        """Parse town data (name, faction, owner)."""
+        TOWN_REGEX = re.compile(rb"(.{4})(.{2})([^\x00]{4,20}[\x00*@?HA-Z]?)", re.DOTALL)
+    
+        self.towns = []
+        #town_start = 0x00355C80  # Town section starts at offset 3,497,088
+        town_end = self.find_hero_section_start()  # End at hero section start
+        print(f"Town section ends at: {town_end}")
+        town_start = town_end - 10000  # Town section starts at offset 3,497,088
+        logger.debug("Searching for towns from offset 0x%08X to 0x%08X", town_start, town_end)
+        
+        matches = TOWN_REGEX.finditer(self.raw[town_start:town_end])
+        print("Regex pattern:", TOWN_REGEX.pattern)
+
+        for m in matches:
+            try:
+                logger.debug("Match at offset 0x%08X: %r", m.start() + town_start, m.group(0))
+
+                flags = m.group(1)
+                name_len = util.bytoi(m.group(2))
+                name_bytes = m.group(3).rstrip(b"\x00")
+                name = name_bytes.decode("latin-1").rstrip("*@?ABCDEFGHIJKLMNOPQRSTUVWXYZ")  # Strip special chars
+                #name = name_bytes.decode("latin-1")  # Strip special chars
+                
+                # Relaxed validation: allow printable ASCII chars
+                if not all(32 <= ord(c) <= 126 for c in name):
+                    logger.debug("Skipping invalid town name at offset 0x%08X: %r (raw: %r, flags: %r, name_len: %d, match: %r)", 
+                                 m.start() + town_start, name, name_bytes, flags, name_len, m.group(0))
+                    continue
+                offset = m.start() + town_start  # Adjust for search range
+                # Faction byte: at offset + 10
+                faction_offset = offset + 10
+                if faction_offset >= len(self.raw):
+                    logger.debug("Skipping town at offset 0x%08X: insufficient data for faction (faction_offset: 0x%08X)", 
+                                 offset, faction_offset)
+                    continue
+                faction_byte = self.raw[faction_offset]
+                # Owner byte: after flags (4), name_len (2), name_bytes, +4 bytes
+                owner_offset = offset + 6 + len(name_bytes) + 4
+                if owner_offset >= len(self.raw):
+                    logger.debug("Skipping town at offset 0x%08X: insufficient data for owner (owner_offset: 0x%08X)", 
+                                 offset, owner_offset)
+                    continue
+                owner_byte = self.raw[owner_offset]
+                town = {
+                    "name": name,
+                    "type": self.FACTION_MAP.get(faction_byte, "Unknown"),
+                    "owner": self.PLAYER_COLOR_MAP.get(owner_byte, "None"),
+                    "offset": offset,
+                }
+                self.towns.append(town)
+                logger.debug("Parsed town: %r at offset 0x%08X (faction_byte: 0x%02X, owner_byte: 0x%02X)", 
+                             name, offset, faction_byte, owner_byte)
+            except (UnicodeDecodeError, struct.error) as e:
+                logger.debug("Failed to parse town at offset 0x%08X: %s (raw: %r, flags: %r, name_len: %d, match: %r)", 
+                             m.start() + town_start, str(e), name_bytes, flags, name_len, m.group(0))
+                continue
+        logger.info("Parsed %d towns: %s", len(self.towns), [t["name"] for t in self.towns])
 
     def parse_heroes(self):
         """Populates and parses all savefile heroes in detail."""
         if not self.heroes: self.populate_heroes()
         for hero in self.heroes: hero.parse()
-
 
     def populate_heroes(self):
         heroes = []
@@ -1373,12 +1464,10 @@ class Savefile(object):
             m = re.search(REGEX, self.raw[pos:pos+5000])
         self.heroes = sorted(heroes, key=lambda x: x.name.lower())
 
-
-        def find_heroes(self, *texts, **keywords):
-            """Yields heroes matching given texts and specific keywords, like skill="Luck"."""
-            for hero in self.heroes:
-                if hero.matches(*texts, **keywords): yield hero
-
+    def find_heroes(self, *texts, **keywords):
+        """Yields heroes matching given texts and specific keywords, like skill="Luck"."""
+        for hero in self.heroes:
+            if hero.matches(*texts, **keywords): yield hero
 
     def update_info(self, filename=None):
         """Updates file modification and size information."""
@@ -1387,11 +1476,9 @@ class Savefile(object):
         self.size  = os.path.getsize(filename)
         self.usize = len(self.raw)
 
-
     def is_changed(self):
         """Returns whether loaded contents have changed."""
         return self.raw != self.raw0
-
 
     def match_byte_ranges(self, positions, ranges):
         """
@@ -1406,8 +1493,6 @@ class Savefile(object):
             if v is None or (minv >= 0 and v < minv) or (maxv >= 0 and v > maxv):
                 return False
         return True
-
-
 
 class Store(object):
     """
@@ -1443,7 +1528,6 @@ class Store(object):
             elif isinstance(result, dict): result.update(copy.deepcopy(r))
         Store.CACHE[(name, category, version)] = result
         return result
-
 
 
 Store.add("artifacts", ARTIFACTS)
