@@ -4,6 +4,11 @@ import os
 import h3tools
 import re
 import math
+import logging
+
+import h3tools.metadata as metadata
+
+logger = logging.getLogger(__name__)
 
 # Hero-to-faction mapping (expanded for Horn of the Abyss)
 HERO_FACTION_MAP = {
@@ -24,13 +29,10 @@ def load_savegame(file_path):
     """Load a Heroes 3 savegame file."""
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Savegame file '{file_path}' not found.")
-    try:
-        return h3tools.Savefile(file_path)
-    except AttributeError:
-        raise ImportError("Could not find Savefile class in h3tool. Check library version or installation.")
+    return h3tools.Savefile(file_path)
 
-def parse_game_info(mapdata):
-    """Parse mapdata['name'] and ['desc'] to extract game information."""
+def parse_game_info(mapdata, towns):
+    """Parse mapdata['name'] and ['desc'] to extract game information, include towns."""
     game_info = {
         "map_name": "",
         "player_names": [],
@@ -43,7 +45,8 @@ def parse_game_info(mapdata):
         "levels": 0,
         "water": "",
         "monsters": 0,
-        "expansion": ""
+        "expansion": "",
+        "towns": []
     }
     
     # Parse mapdata['name'] for player names, game date, and template
@@ -111,6 +114,21 @@ def parse_game_info(mapdata):
         except (AttributeError, TypeError):
             pass
     
+    # Add town data
+    try:
+        game_info["towns"] = [
+            {
+                "name": town["name"],
+                "type": town["type"],
+                "owner": town["owner"],
+                "coordinates": {"x": town["x"], "y": town["y"], "z": town["z"]}
+            }
+            for town in towns
+        ]
+        logger.debug("Parsed %d towns: %s", len(towns), [t["name"] for t in towns])
+    except (AttributeError, TypeError, KeyError) as e:
+        logger.warning("Failed to parse town data: %s", e)
+    
     return game_info
 
 def calculate_army_strength(army, attack_skill, defense_skill, ai_values):
@@ -125,20 +143,31 @@ def calculate_army_strength(army, attack_skill, defense_skill, ai_values):
         unit_count = unit.get("count", 0)
         ai_value = ai_values.get(unit_name, 0)  # Default to 0 if unit not found
         if ai_value == 0:
-            print(f"Warning: AI Value not found for unit '{unit_name}'")
+            logger.warning("AI Value not found for unit '%s'", unit_name)
         total_ai_value += ai_value * unit_count
     
     # Army strength = total AI Value * H
     return round(total_ai_value * H, 2)
 
 def extract_hero_stats(save, ai_values):
-    """Extract stats for all heroes in the savegame."""
+    """Extract stats for all heroes and towns in the savegame."""
     heroes = []
+
     try:
         for i, hero in enumerate(save.heroes):
             try:
                 # Get stats dictionary
                 stats = getattr(hero, "stats", {})
+                # Get spells available in spell book
+                spells = getattr(hero, "spells", {})
+
+                ARTIFACT_SPELLS = metadata.Store.get("artifact_spells", version='hota')
+                #artifact_spells0 = set(y for x in hero.original.get("equipment", {}).values()
+                #           for y in ARTIFACT_SPELLS.get(x, [])) if hero else set()
+                artifact_spells  = set(y for x in hero.equipment.values()
+                           for y in ARTIFACT_SPELLS.get(x, [])) if hero else set()
+                #print(artifact_spells)
+
                 
                 # Get hero name and faction
                 hero_name = getattr(hero, "name", "Unknown")
@@ -176,18 +205,24 @@ def extract_hero_stats(save, ai_values):
                     "faction": hero_faction,
                     "owner": "Unknown",
                     "army": army,
-                    "army_strength": army_strength
+                    "army_strength": army_strength,
+                    "spells": list(spells),
+                    "artifact_spells": list(artifact_spells)
+                
+                        
                 }
                 heroes.append(hero_data)
             except AttributeError as e:
-                print(f"Warning: Failed to extract data for hero {getattr(hero, 'name', 'Unknown')}: {e}")
+                logger.warning("Failed to extract data for hero %s: %s", getattr(hero, 'name', 'Unknown'), e)
                 continue
     except AttributeError:
-        raise AttributeError("Savefile object does not have 'heroes' attribute. Check h3sed library compatibility.")
+        raise AttributeError("Savefile object does not have 'heroes' attribute. Check h3tools library compatibility.")
     
-    # Parse game info from mapdata
+    # Parse game info from mapdata and towns
     mapdata = getattr(save, "mapdata", {})
-    game_info = parse_game_info(mapdata)
+    towns = getattr(save, "towns", [])
+    logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
+    game_info = parse_game_info(mapdata, towns)
     
     # Return both heroes and game info
     return {"heroes": heroes, "game_info": game_info}
@@ -196,14 +231,17 @@ def save_to_json(data, output_file):
     """Save hero stats and game info to a JSON file."""
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
-    print(f"Hero stats and game info saved to '{output_file}'")
+    logger.info("Hero stats, game info, and town data saved to '%s'", output_file)
 
 def main():
-    parser = argparse.ArgumentParser(description="Extract hero stats and game info from Heroes 3 savegame to JSON.")
+    parser = argparse.ArgumentParser(description="Extract hero stats, game info, and town data from Heroes 3 savegame to JSON.")
     parser.add_argument("savegame", help="Path to the Heroes 3 savegame file")
     parser.add_argument("--output", "-o", default="hero_stats.json",
                         help="Output JSON file (default: hero_stats.json)")
     args = parser.parse_args()
+
+    # Configure logging
+    logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
 
     try:
         # Load AI values from creature_ai_values.json
@@ -211,23 +249,23 @@ def main():
             with open("creature_ai_values.json", "r") as f:
                 ai_values = json.load(f)
         except FileNotFoundError:
-            print("Error: creature_ai_values.json not found in current directory")
+            logger.error("creature_ai_values.json not found in current directory")
             exit(1)
         except json.JSONDecodeError:
-            print("Error: creature_ai_values.json is not a valid JSON file")
+            logger.error("creature_ai_values.json is not a valid JSON file")
             exit(1)
 
         # Load savegame
         save = load_savegame(args.savegame)
         
-        # Extract hero stats and game info
+        # Extract hero stats, game info, and town data
         data = extract_hero_stats(save, ai_values)
         
         # Save to JSON
         save_to_json(data, args.output)
         
     except Exception as e:
-        print(f"Error: {str(e)}")
+        logger.error("Error: %s", str(e))
         exit(1)
 
 if __name__ == "__main__":
