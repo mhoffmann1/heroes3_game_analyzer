@@ -1443,8 +1443,7 @@ class Savefile(object):
                         resources[name] = values[j]
                     print(f"[DEBUG] Resource bytes for {color} at 0x{start_offset + resource_offset:08X}: {block_data[resource_offset:resource_offset + 28].hex()}")
 
-                    # Sanity check
-                    owner_id = block_data[0x6A] if len(block_data) > 0x6A else 255
+                    # Sanity check                    
                     if all(expected_min[j] <= resources[name] <= expected_max[j] for j, name in enumerate(resource_names)):
                         
                         player_data = {
