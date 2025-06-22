@@ -1307,10 +1307,12 @@ class Savefile(object):
         self.mapdata  = {}
         self.size     = 0
         self.usize    = 0
+        self.town_section_start = None
         self.heroes   = []
         self.towns    = []
         self.player_sections = []
         self.read(parse_heroes)
+        
 
     def patch(self, bytes, span):
         """Patches unpacked contents with bytes from span[0] to span[1]."""
@@ -1334,8 +1336,9 @@ class Savefile(object):
         self.towns = []
         self.detect_version()
         self.parse_metadata()
-        self.extract_player_sections(self.raw)
         self.parse_towns()
+        self.extract_player_sections(self.raw)
+        
         if parse_heroes: self.parse_heroes()
         self.update_info()
         logger.info("Opened %s (%s, unzipped %s).", self.filename,
@@ -1382,71 +1385,89 @@ class Savefile(object):
         logger.info("Detected %s as version %r.", self.filename, self.version)
 
     def extract_player_sections(self, raw_data):
-        """Extract 200-byte player data sections for all 8 HotA players with auto-detected resource parsing."""
-        import struct
-        from collections import OrderedDict
-    
+        """Extract 200-byte player data sections for all 8 HotA players with dynamic detection."""
+        # Verify raw_data integrity
+        if len(raw_data) < 0x00355D34:
+            raise ValueError(f"raw_data too short: {len(raw_data)} bytes, expected at least 0x00355D34")
+        print(f"[DEBUG] raw_data at 0x003558A0: {raw_data[0x003558A0:0x003558D0].hex()}")
+
         player_sections = []
         player_colors = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink"]
         block_size = 200
-    
-        # Start at Red's known offset
-        base_offset = 0x003558A0
-    
+        step_size = 149  # Red-Blue spacing (0x95)
+
+        # Dynamic player section start
+        if not hasattr(self, 'town_section_start') or self.town_section_start is None:
+            raise ValueError("town_section_start not set. Run parse_towns() first.")
+        estimated_player_section_size = 2000
+        player_section_start = self.town_section_start - estimated_player_section_size
+        player_section_end = self.town_section_start
+
+        print(f"Scanning for player data from 0x{player_section_start:08X} to 0x{player_section_end:08X}")
+
         resource_names = ["wood", "mercury", "ore", "sulfur", "crystals", "gems", "gold"]
         expected_min = [0, 0, 0, 0, 0, 0, 0]
-        expected_max = [1000, 1000, 1000, 1000, 1000, 1000, 200000]
-    
+        expected_max = [1000, 1000, 1000, 1000, 1000, 1000, 3000000]
+
+        # Known offsets
+        known_offsets = {
+            "Red": 0x003558A0,
+            "Blue": 0x00355935,
+            "Tan": 0x003559CA,
+            "Green": 0x00355A5F,
+            "Orange": 0x00355AF4,
+            "Purple": 0x00355B89,
+            "Teal": 0x00355C1E,
+            "Pink": 0x00355CB3
+        }
+
         for i, color in enumerate(player_colors):
-            start_offset = base_offset + i * block_size
+            start_offset = known_offsets.get(color, player_section_start + i * step_size)
             end_offset = start_offset + block_size
             if len(raw_data) < end_offset:
                 logger.warning(f"Skipping {color}: block exceeds data size at 0x{start_offset:08X}")
                 continue
-            
+
             block_data = raw_data[start_offset:end_offset]
-            hex_snippet = block_data.hex()
+            print(f"[DEBUG] Block bytes for {color} at 0x{start_offset:08X}: {block_data[:0x40].hex()}")
+
+            hex_snippet = block_data[0x0B:0x27].hex() if len(block_data) > 0x27 else block_data.hex()
             resources = OrderedDict()
-    
-            # Auto-detect resource block inside the player block
-            detected = False
-            for offset in range(block_size - 28):  # 7 * 4 bytes
+
+            # Extract 4-byte resources
+            if len(block_data) > 0x27:
                 try:
-                    chunk = block_data[offset:offset + 28]
-                    values = struct.unpack('<7I', chunk)
-                    if all(expected_min[j] <= values[j] <= expected_max[j] for j in range(7)):
-                        resource_offset = offset
-                        detected = True
-                        logger.debug(f"Detected resource block for {color} at 0x{start_offset + offset:08X}")
-                        break
-                except struct.error:
-                    continue
-                
-            if not detected:
-                logger.warning(f"Could not auto-detect resource block for {color}")
-                continue
-            
-            for j, resource in enumerate(resource_names):
-                value_offset = resource_offset + j * 4
-                value_bytes = block_data[value_offset:value_offset + 4]
-                value = int.from_bytes(value_bytes, byteorder="little")
-                resources[resource] = value
-                logger.debug(f"{color} {resource} at 0x{start_offset + value_offset:08X}: {value_bytes.hex()} = {value}")
-    
-            player_data = {
-                "color": color,
-                "start_offset": start_offset,
-                "hex_snippet": hex_snippet,
-                "length": len(block_data),
-                "resources": resources
-            }
-            player_sections.append(player_data)
-    
-            resource_str = ", ".join(f"{k}={v}" for k, v in resources.items())
-            print(f"Player {color} block: offset=0x{start_offset:08X}, length={len(block_data)}")
-            print(f"Resources: {resource_str}")
-            print(f"Hex: {hex_snippet}\n")
-    
+                    resource_offset = 0x0B
+                    values = struct.unpack('<7I', block_data[resource_offset:resource_offset + 28])
+                    for j, name in enumerate(resource_names):
+                        resources[name] = values[j]
+                    print(f"[DEBUG] Resource bytes for {color} at 0x{start_offset + resource_offset:08X}: {block_data[resource_offset:resource_offset + 28].hex()}")
+
+                    # Sanity check
+                    owner_id = block_data[0x6A] if len(block_data) > 0x6A else 255
+                    if (all(expected_min[j] <= resources[name] <= expected_max[j] for j, name in enumerate(resource_names)) and
+                        sum(1 for v in resources.values() if v > 0) >= 3 and
+                        owner_id < 8):  # Active player
+                        resources["owner_id"] = owner_id
+                        player_data = {
+                            "color": color,
+                            "start_offset": start_offset,
+                            "hex_snippet": hex_snippet,
+                            "length": len(block_data),
+                            "resources": resources
+                        }
+                        player_sections.append(player_data)
+                        resource_str = ", ".join(f"{k}={v}" for k, v in resources.items())
+                        print(f"Player {color} block: offset=0x{start_offset:08X}, length={len(block_data)}")
+                        print(f"Resources: {resource_str}")
+                        print(f"Hex: {hex_snippet}\n")
+                    else:
+                        print(f"[DEBUG] Invalid resources for {color} at 0x{start_offset:08X}: {resources}, owner_id={owner_id}")
+                except Exception as e:
+                    print(f"[DEBUG] Error extracting resources for {color} at 0x{start_offset:08X}: {e}")
+            else:
+                print(f"[DEBUG] Block too short for {color} at 0x{start_offset:08X}")
+
         logger.info("Extracted %d player sections", len(player_sections))
         return player_sections
 
@@ -1545,6 +1566,13 @@ class Savefile(object):
                 #print()
 #
                 self.towns.append(town)
+
+                # Store the first valid town offset
+                
+                if self.town_section_start is None:
+                    print(f"Setting start of town section")
+                    self.town_section_start = offset
+                    logger.info(f"First town found at offset 0x{offset:08X} — stored as town_section_start")
                 #logger.debug(
                 #    "Parsed town: %r at offset 0x%08X (faction_byte: 0x%02X, owner_byte: 0x%02X)",
                 #    name, offset, faction_byte, owner_byte
