@@ -1407,7 +1407,7 @@ class Savefile(object):
 
         resource_names = ["wood", "mercury", "ore", "sulfur", "crystals", "gems", "gold"]
         expected_min = [0, 0, 0, 0, 0, 0, 0]
-        expected_max = [1000, 1000, 1000, 1000, 1000, 1000, 3000000]
+        expected_max = [999, 999, 999, 999, 999, 999, 3000000]
 
         # Known offsets
         known_offsets = {
@@ -1445,10 +1445,8 @@ class Savefile(object):
 
                     # Sanity check
                     owner_id = block_data[0x6A] if len(block_data) > 0x6A else 255
-                    if (all(expected_min[j] <= resources[name] <= expected_max[j] for j, name in enumerate(resource_names)) and
-                        sum(1 for v in resources.values() if v > 0) >= 3 and
-                        owner_id < 8):  # Active player
-                        resources["owner_id"] = owner_id
+                    if all(expected_min[j] <= resources[name] <= expected_max[j] for j, name in enumerate(resource_names)):
+                        
                         player_data = {
                             "color": color,
                             "start_offset": start_offset,
@@ -1462,7 +1460,7 @@ class Savefile(object):
                         print(f"Resources: {resource_str}")
                         print(f"Hex: {hex_snippet}\n")
                     else:
-                        print(f"[DEBUG] Invalid resources for {color} at 0x{start_offset:08X}: {resources}, owner_id={owner_id}")
+                        print(f"[DEBUG] Invalid resources for {color} at 0x{start_offset:08X}: {resources}")
                 except Exception as e:
                     print(f"[DEBUG] Error extracting resources for {color} at 0x{start_offset:08X}: {e}")
             else:
