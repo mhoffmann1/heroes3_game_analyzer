@@ -1382,38 +1382,39 @@ class Savefile(object):
         logger.info("Detected %s as version %r.", self.filename, self.version)
 
     def extract_player_sections(self, raw_data):
-        """Extract 200-byte player data sections for Red and Blue players from HotA, with correct resource parsing."""
+        """Extract 200-byte player data sections for all 8 HotA players with auto-detected resource parsing."""
         import struct
         from collections import OrderedDict
     
         player_sections = []
-        players = [
-            ("Red", 0x003558A0),
-            ("Blue", 0x00355935)
-        ]
+        player_colors = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink"]
         block_size = 200
+    
+        # Start at Red's known offset
+        base_offset = 0x003558A0
     
         resource_names = ["wood", "mercury", "ore", "sulfur", "crystals", "gems", "gold"]
         expected_min = [0, 0, 0, 0, 0, 0, 0]
-        expected_max = [1000, 1000, 1000, 1000, 1000, 1000, 200000]  # Gold can be larger
+        expected_max = [1000, 1000, 1000, 1000, 1000, 1000, 200000]
     
-        for color, start_offset in players:
+        for i, color in enumerate(player_colors):
+            start_offset = base_offset + i * block_size
             end_offset = start_offset + block_size
             if len(raw_data) < end_offset:
-                logger.error(f"Raw data too small for {color} at 0x{start_offset:08X}")
+                logger.warning(f"Skipping {color}: block exceeds data size at 0x{start_offset:08X}")
                 continue
             
             block_data = raw_data[start_offset:end_offset]
             hex_snippet = block_data.hex()
             resources = OrderedDict()
     
-            # Auto-detect the correct offset
+            # Auto-detect resource block inside the player block
             detected = False
             for offset in range(block_size - 28):  # 7 * 4 bytes
                 try:
                     chunk = block_data[offset:offset + 28]
                     values = struct.unpack('<7I', chunk)
-                    if all(expected_min[i] <= values[i] <= expected_max[i] for i in range(7)):
+                    if all(expected_min[j] <= values[j] <= expected_max[j] for j in range(7)):
                         resource_offset = offset
                         detected = True
                         logger.debug(f"Detected resource block for {color} at 0x{start_offset + offset:08X}")
@@ -1425,8 +1426,8 @@ class Savefile(object):
                 logger.warning(f"Could not auto-detect resource block for {color}")
                 continue
             
-            for i, resource in enumerate(resource_names):
-                value_offset = resource_offset + (i * 4)
+            for j, resource in enumerate(resource_names):
+                value_offset = resource_offset + j * 4
                 value_bytes = block_data[value_offset:value_offset + 4]
                 value = int.from_bytes(value_bytes, byteorder="little")
                 resources[resource] = value
