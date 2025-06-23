@@ -1311,6 +1311,7 @@ class Savefile(object):
         self.heroes   = []
         self.towns    = []
         self.player_sections = []
+        self.player_resources = []
         self.read(parse_heroes)
         
 
@@ -1337,7 +1338,9 @@ class Savefile(object):
         self.detect_version()
         self.parse_metadata()
         self.parse_towns()
-        self.extract_player_sections(self.raw)
+        self.player_resources = self.extract_player_sections(self.raw)
+
+        print(f"Player resources: {self.player_resources}")
         
         if parse_heroes: self.parse_heroes()
         self.update_info()
@@ -1385,87 +1388,77 @@ class Savefile(object):
         logger.info("Detected %s as version %r.", self.filename, self.version)
 
     def extract_player_sections(self, raw_data):
-        """Extract 200-byte player data sections for all 8 HotA players with dynamic detection."""
-        # Verify raw_data integrity
-        if len(raw_data) < 0x00355D34:
-            raise ValueError(f"raw_data too short: {len(raw_data)} bytes, expected at least 0x00355D34")
-        print(f"[DEBUG] raw_data at 0x003558A0: {raw_data[0x003558A0:0x003558D0].hex()}")
+        """Dynamically detect and extract 200-byte player blocks for 8 HotA players."""
+        from collections import OrderedDict
+        import struct
 
-        player_sections = []
-        player_colors = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink"]
-        block_size = 200
-        step_size = 149  # Red-Blue spacing (0x95)
-
-        # Dynamic player section start
+        # Preconditions
         if not hasattr(self, 'town_section_start') or self.town_section_start is None:
             raise ValueError("town_section_start not set. Run parse_towns() first.")
-        estimated_player_section_size = 2000
-        player_section_start = self.town_section_start - estimated_player_section_size
-        player_section_end = self.town_section_start
 
-        print(f"Scanning for player data from 0x{player_section_start:08X} to 0x{player_section_end:08X}")
-
+        # Parameters
+        block_size = 200
+        player_count = 8
+        spacing = 149  # bytes between blocks
+        search_window_size = 2000  # bytes to search before town section
+        ff_signature = b'\xff' * 11
+        player_colors = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink"]
         resource_names = ["wood", "mercury", "ore", "sulfur", "crystals", "gems", "gold"]
         expected_min = [0, 0, 0, 0, 0, 0, 0]
         expected_max = [999, 999, 999, 999, 999, 999, 3000000]
 
-        # Known offsets
-        known_offsets = {
-            "Red": 0x003558A0,
-            "Blue": 0x00355935,
-            "Tan": 0x003559CA,
-            "Green": 0x00355A5F,
-            "Orange": 0x00355AF4,
-            "Purple": 0x00355B89,
-            "Teal": 0x00355C1E,
-            "Pink": 0x00355CB3
-        }
+        player_sections = []
 
-        for i, color in enumerate(player_colors):
-            start_offset = known_offsets.get(color, player_section_start + i * step_size)
-            end_offset = start_offset + block_size
-            if len(raw_data) < end_offset:
-                logger.warning(f"Skipping {color}: block exceeds data size at 0x{start_offset:08X}")
+        start_offset = max(0, self.town_section_start - search_window_size)
+        end_offset = self.town_section_start
+
+        print(f"Scanning from 0x{start_offset:08X} to 0x{end_offset + block_size:08X} for player block pattern...")
+
+        for offset in range(start_offset, end_offset + block_size):
+            # Try to read the first block
+            first_block = raw_data[offset:offset + block_size]
+            if len(first_block) < block_size or not first_block.startswith(ff_signature):
                 continue
 
-            block_data = raw_data[start_offset:end_offset]
-            print(f"[DEBUG] Block bytes for {color} at 0x{start_offset:08X}: {block_data[:0x40].hex()}")
+            match_score = 0
+            candidate_blocks = []
+            for i in range(player_count):
+                block_offset = offset + i * spacing
+                block = raw_data[block_offset:block_offset + block_size]
+                if len(block) < block_size or not block.startswith(ff_signature):
+                    break
 
-            hex_snippet = block_data[0x0B:0x27].hex() if len(block_data) > 0x27 else block_data.hex()
-            resources = OrderedDict()
-
-            # Extract 4-byte resources
-            if len(block_data) > 0x27:
                 try:
-                    resource_offset = 0x0B
-                    values = struct.unpack('<7I', block_data[resource_offset:resource_offset + 28])
-                    for j, name in enumerate(resource_names):
-                        resources[name] = values[j]
-                    print(f"[DEBUG] Resource bytes for {color} at 0x{start_offset + resource_offset:08X}: {block_data[resource_offset:resource_offset + 28].hex()}")
+                    resource_bytes = block[0x0B:0x0B + 28]
+                    values = struct.unpack('<7I', resource_bytes)
+                    valid = all(expected_min[j] <= values[j] <= expected_max[j] for j in range(7))
+                    if not valid:
+                        break
+                    resources = OrderedDict((name, val) for name, val in zip(resource_names, values))
+                    candidate_blocks.append({
+                        "color": player_colors[i],
+                        "start_offset": block_offset,
+                        "hex_snippet": resource_bytes.hex(),
+                        "length": len(block),
+                        "resources": resources
+                    })
+                    match_score += 1
+                except struct.error:
+                    break
 
-                    # Sanity check                    
-                    if all(expected_min[j] <= resources[name] <= expected_max[j] for j, name in enumerate(resource_names)):
-                        
-                        player_data = {
-                            "color": color,
-                            "start_offset": start_offset,
-                            "hex_snippet": hex_snippet,
-                            "length": len(block_data),
-                            "resources": resources
-                        }
-                        player_sections.append(player_data)
-                        resource_str = ", ".join(f"{k}={v}" for k, v in resources.items())
-                        print(f"Player {color} block: offset=0x{start_offset:08X}, length={len(block_data)}")
-                        print(f"Resources: {resource_str}")
-                        print(f"Hex: {hex_snippet}\n")
-                    else:
-                        print(f"[DEBUG] Invalid resources for {color} at 0x{start_offset:08X}: {resources}")
-                except Exception as e:
-                    print(f"[DEBUG] Error extracting resources for {color} at 0x{start_offset:08X}: {e}")
-            else:
-                print(f"[DEBUG] Block too short for {color} at 0x{start_offset:08X}")
+            if match_score == player_count:
+                print(f"✅ Match found at offset 0x{offset:08X}")
+                for section in candidate_blocks:
+                    resource_str = ", ".join(f"{k}={v}" for k, v in section["resources"].items())
+                    print(f"[{section['color']}] Offset=0x{section['start_offset']:08X}, Resources: {resource_str}")
+                player_sections.extend(candidate_blocks)
+                break  # Stop after first valid set
 
-        logger.info("Extracted %d player sections", len(player_sections))
+        if not player_sections:
+            print("❌ No valid 8-player block sequence found.")
+        else:
+            logger.info("Extracted %d player sections", len(player_sections))
+
         return player_sections
 
     def parse_metadata(self):

@@ -116,16 +116,8 @@ def parse_game_info(mapdata, towns):
     
     # Add town data
     try:
-        game_info["towns"] = [
-            {
-                "name": town["name"],
-                "type": town["type"],
-                "owner": town["owner"],
-                "coordinates": {"x": town["x"], "y": town["y"], "z": town["z"]}
-            }
-            for town in towns
-        ]
-        logger.debug("Parsed %d towns: %s", len(towns), [t["name"] for t in towns])
+        game_info["towns"] = towns
+        #logger.debug("Parsed %d towns: %s", len(towns), [t["name"] for t in towns])
     except (AttributeError, TypeError, KeyError) as e:
         logger.warning("Failed to parse town data: %s", e)
     
@@ -221,11 +213,13 @@ def extract_hero_stats(save, ai_values):
     # Parse game info from mapdata and towns
     mapdata = getattr(save, "mapdata", {})
     towns = getattr(save, "towns", [])
+    resources = getattr(save, "player_resources")
+    print(f"Resources: {resources}")
     logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
     game_info = parse_game_info(mapdata, towns)
     
     # Return both heroes and game info
-    return {"heroes": heroes, "game_info": game_info}
+    return {"heroes": heroes, "game_info": game_info, "resources": resources}
 
 def save_to_json(data, output_file):
     """Save hero stats and game info to a JSON file."""

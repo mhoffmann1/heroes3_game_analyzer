@@ -389,12 +389,6 @@ class Hero(object):
         self.span   = span
         self.serialed = AttrDict((k, v.copy()) for k, v in self.properties.items())
         
-        # No owner parsing here; handled in read_save.py
-        if bytes and len(bytes) > 0:
-            print(f"DEBUG: Hero {self.name} (index {index}, span {span}): hero bytes = {len(bytes)}")
-        else:
-            print(f"WARNING: No data for hero {self.name}")
-
     def parse(self):
         """Parses hero bytes to properties."""
         for section, module in PROPERTIES.items():
