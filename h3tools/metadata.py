@@ -1598,6 +1598,13 @@ class Savefile(object):
                 name = util.to_unicode(rgx_strip.match(m.group("name")).group(1))
                 hero = h3tools.hero.Hero(name, version=self.version)
                 hero.set_file_data(blob, len(heroes), (start + pos, end + pos))  # Pass self.raw
+                
+                print(f"Found hero: {name} at offset: {pos+start-63} to {pos+end}")
+                fullblob = bytearray(self.raw[pos + start-63:pos + end])
+                ownership_byte = fullblob[0x20] if len(fullblob) > 0x20 else 255
+                hero.set_owner(ownership_byte)
+                print(f"Ownership byte (0x20): 0x{ownership_byte:02X} ({ownership_byte})")
+                print(f"Hero: {hero.owner}")
                 heroes.append(hero)
                 pos += end
             else:

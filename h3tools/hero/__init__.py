@@ -350,6 +350,21 @@ class Hero(object):
         self.ensure_basestats()
 
 
+    def set_owner(self, value):
+        color_map = {
+            0: "Red",
+            1: "Blue",
+            2: "Tan",
+            3: "Green",
+            4: "Orange",
+            5: "Purple",
+            6: "Teal",
+            7: "Pink",
+            255: None
+        }
+        self.owner = color_map.get(value, None)
+
+
     def copy(self):
         """Returns a copy of this hero."""
         hero = Hero(self.name, self.version)

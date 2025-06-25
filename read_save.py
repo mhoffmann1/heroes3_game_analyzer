@@ -195,7 +195,7 @@ def extract_hero_stats(save, ai_values):
                         if hasattr(skill, "name") and skill.name
                     ],
                     "faction": hero_faction,
-                    "owner": "Unknown",
+                    "owner": hero.owner,
                     "army": army,
                     "army_strength": army_strength,
                     "spells": list(spells),
