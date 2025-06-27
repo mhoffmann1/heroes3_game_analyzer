@@ -1242,30 +1242,6 @@ class Savefile(object):
     TOWN_REGEX = re.compile(b"\x00{10,30}(.{4})(.{2})([^\x00]{4,20}[\x00*@?H]?)", re.DOTALL)
     #TOWN_REGEX = re.compile(b"\x00{10,50}(.{4})(.{2})([^\x00]{1,30}[\x00*@?H]?)", re.DOTALL)
 
-    PLAYER_COLOR_MAP = {
-        0x28: "Red",
-        0xCB: "Blue",
-        0xFF: "None",
-        0x80: "Teal",
-        0x1E: "Orange",
-        0x20: "Green",
-        0x24: "Tan",
-        0x30: "Purple",
-    }
-
-    FACTION_MAP = {
-        0x00: "Inferno",
-        0x12: "Stronghold",
-        0x04: "Fortress",
-        0x08: "Tower",
-        0x1E: "Factory",
-        0x0C: "Dungeon",
-        0x24: "Dungeon",
-        0x13: "Cove",
-        0x30: "Rampart",
-        0x1C: "Castle",
-    }
-
     owner_colors = {
         0x00: "Red",
         0x01: "Blue",
@@ -1455,7 +1431,7 @@ class Savefile(object):
                 break  # Stop after first valid set
 
         if not player_sections:
-            print("❌ No valid 8-player block sequence found.")
+            print("No valid 8-player block sequence found.")
         else:
             logger.info("Extracted %d player sections", len(player_sections))
 
@@ -1498,9 +1474,9 @@ class Savefile(object):
         TOWN_REGEX = re.compile(rb"(.{4})(.{2})([^\x00]{4,20}[\x00*@?HA-Z]?)", re.DOTALL)
 
         self.towns = []
-        town_end = self.find_hero_section_start()
+        town_end = self.find_hero_section_start() - 63  # 63 normally unused byte shift
         print(f"Town section ends at: {town_end}")
-        town_start = town_end - 10000
+        town_start = max(0,town_end - 10000)
         #logger.debug("Searching for towns from offset 0x%08X to 0x%08X", town_start, town_end)
 
         matches = TOWN_REGEX.finditer(self.raw[town_start:town_end])
@@ -1508,7 +1484,6 @@ class Savefile(object):
 
         for m in matches:
             try:
-                absolute_offset = m.start() + town_start
                 flags = m.group(1)
                 name_len = util.bytoi(m.group(2))
                 name_bytes = m.group(3).rstrip(b"\x00")
@@ -1517,12 +1492,23 @@ class Savefile(object):
                 if not all(32 <= ord(c) <= 126 for c in name):
                     continue
 
-                offset = m.start() + town_start
+                offset = m.start() + town_start + 6
                 name_end_offset = offset + 6 + len(name_bytes)
 
+                # 02 - Town_ID, 00 - Owner_ID (Player_ID), 08 - Conflux, 0D 05 00 - town's coordinates
+                coord_offset = offset-71 # Calculated manually
+                
+                x = self.raw[coord_offset+4]
+                y = self.raw[coord_offset+5]
+                z = self.raw[coord_offset+6]
+                level = 'Underground' if z == 1 else 'Surface'
+                
+                player = self.owner_colors.get(self.raw[coord_offset], "None")
+                faction = self.faction_mapping.get(self.raw[coord_offset + 3])
+                
                 # Compute context region around name_end_offset
-                context_start = max(0, name_end_offset - 6)
-                context_end = name_end_offset + 30
+                context_start = max(0, offset + 6 - 300)
+                context_end = name_end_offset + 300
                 town_bytes = self.raw[context_start:context_end]
 
                 owner_offset = name_end_offset + 1
@@ -1531,53 +1517,35 @@ class Savefile(object):
                 if faction_offset >= len(self.raw) or owner_offset >= len(self.raw):
                     continue
 
-                owner_byte = self.raw[owner_offset]
-                faction_byte = self.raw[faction_offset]
-
                 town = {
                     "name": name,
-                    "type": self.faction_mapping.get(faction_byte, f"Unknown({faction_byte:#02X})"),
-                    "owner": self.owner_colors.get(owner_byte, "None"),
+                    "type": faction,
+                    "owner": player,
                     "offset": offset,
+                    "coords": [x, y, level]
                 }
-#
-                #print(f"Bytes around town {name} (offsets relative to end of name at 0x{name_end_offset:08X}):")
-                #for i, b in enumerate(town_bytes):
-                #    rel_i = i - 6  # offset relative to name end
-                #    byte_offset = context_start + i
-#
-                #    label = ""
-                #    if byte_offset == owner_offset:
-                #        label = " <= OWNER"
-                #    elif byte_offset == faction_offset:
-                #        label = " <= FACTION"
-#
-                #    print(f"  {rel_i:+03d}: 0x{b:02X}{label}")
-                #print()
-#
+
                 self.towns.append(town)
 
-                # Store the first valid town offset
+                # Print context bytes for ownership analysis
+                print(f"Town: {name} at offset: {offset} (name ends at: {name_end_offset})")
+                print(f"x={x}, y={y}, level={level}")
+                print(f"Bytes before coord: {self.raw[coord_offset-20:coord_offset+4].hex()}\n")
+
                 
                 if self.town_section_start is None:
-                    print(f"Setting start of town section")
                     self.town_section_start = offset
                     logger.info(f"First town found at offset 0x{offset:08X} — stored as town_section_start")
-                #logger.debug(
-                #    "Parsed town: %r at offset 0x%08X (faction_byte: 0x%02X, owner_byte: 0x%02X)",
-                #    name, offset, faction_byte, owner_byte
-                #)
 
             except (UnicodeDecodeError, struct.error) as e:
                 logger.debug(
                     "Failed to parse town at offset 0x%08X: %s (raw: %r, flags: %r, name_len: %d, match: %r)",
                     m.start() + town_start, str(e), name_bytes, flags, name_len, m.group(0)
                 )
-            continue
+                continue
 
         logger.info("Parsed %d towns: %s", len(self.towns), [t["name"] for t in self.towns])
         #logger.debug(self.towns)
-
 
     def parse_heroes(self):
         """Populates and parses all savefile heroes in detail."""
@@ -1603,8 +1571,8 @@ class Savefile(object):
                 fullblob = bytearray(self.raw[pos + start-63:pos + end])
                 ownership_byte = fullblob[0x20] if len(fullblob) > 0x20 else 255
                 hero.set_owner(ownership_byte)
-                print(f"Ownership byte (0x20): 0x{ownership_byte:02X} ({ownership_byte})")
-                print(f"Hero: {hero.owner}")
+                #print(f"Ownership byte (0x20): 0x{ownership_byte:02X} ({ownership_byte})")
+                print(f"Player: {hero.owner}")
                 heroes.append(hero)
                 pos += end
             else:
