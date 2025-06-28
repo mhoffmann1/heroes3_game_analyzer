@@ -1705,50 +1705,10 @@ class Savefile(object):
                 print(f"Garrison block: {self.raw[coord_offset:coord_offset + 70].hex()}")
 
                 garrison_offset = coord_offset + 9
-                print(f"Garrison offset: {self.raw[garrison_offset]}")
-                while not self.raw[garrison_offset]:
-                    garrison_offset += 1
-                    print(f"Garrison offset: {self.raw[garrison_offset]}")
-                print(f"Garrison offset: {self.raw[garrison_offset]}")
                 garrison = self.parse_garrison(garrison_offset)
 
                 print(f"Attempt1 garrison: {garrison}")
 
-                # Attempt 2
-
-                garrison_start = coord_offset + 9
-                creature_ids = []
-                creature_counts = []
-
-                try:
-                    for i in range(7):
-                        id_offset = garrison_start + (i * 4)
-                        creature_id = int.from_bytes(self.raw[id_offset:id_offset + 4], 'little')
-                        creature_ids.append(creature_id)
-
-                    count_base = garrison_start + (7 * 4)
-                    for i in range(7):
-                        count_offset = count_base + (i * 4)
-                        creature_count = int.from_bytes(self.raw[count_offset:count_offset + 4], 'little')
-                        creature_counts.append(creature_count)
-
-                    garrison = []
-                    for cid, count in zip(creature_ids, creature_counts):
-                        if cid != 0xFFFFFFFF and count > 0:
-                            creature_name = self.creature_mapping.get(cid, f"Unknown({cid})")
-                            garrison.append({"id": cid, "name": creature_name, "count": count})
-
-                    # 🐞 Debug output for garrison
-                    if garrison:
-                        print(f"Garrison for {name}:")
-                        for slot in garrison:
-                            print(f"  - {slot['count']}x {slot['name']} (ID {slot['id']})")
-                    else:
-                        print(f"Garrison for {name}: empty")
-
-                except Exception as e:
-                    print(f"Failed to parse garrison for {name} at offset {garrison_start}: {e}")
-                    garrison = []
 
                 town = {
                     "name": name,
@@ -1785,20 +1745,56 @@ class Savefile(object):
         #logger.debug(self.towns)
 
     def parse_garrison(self, offset):
-        garrison = []
-        # Read 7 creature IDs
-        creature_ids = struct.unpack_from('<7I', self.raw, offset)
-        # Read 7 creature amounts
-        amounts = struct.unpack_from('<7I', self.raw, offset + 28)
+        garrison_start = offset
+        creature_ids = []
+        creature_counts = []
 
-        for slot, (creature_id, amount) in enumerate(zip(creature_ids, amounts), 1):
-            if creature_id != 0xFFFFFFFF:
-                garrison.append({
-                    'slot': slot,
-                    'creature_id': creature_id,
-                    'amount': amount
-                })
+        try:
+            for i in range(7):
+                id_offset = garrison_start + (i * 4)
+                creature_id = int.from_bytes(self.raw[id_offset:id_offset + 4], 'little')
+                creature_ids.append(creature_id)
+
+            count_base = garrison_start + (7 * 4)
+            for i in range(7):
+                count_offset = count_base + (i * 4)
+                creature_count = int.from_bytes(self.raw[count_offset:count_offset + 4], 'little')
+                creature_counts.append(creature_count)
+
+            garrison = []
+            for cid, count in zip(creature_ids, creature_counts):
+                if cid != 0xFFFFFFFF and count > 0:
+                    creature_name = self.creature_mapping.get(cid, f"Unknown({cid})")
+                    garrison.append({"id": cid, "name": creature_name, "count": count})
+
+            # 🐞 Debug output for garrison
+            if garrison:
+                print(f"Garrison:")
+                for slot in garrison:
+                    print(f"  - {slot['count']}x {slot['name']} (ID {slot['id']})")
+            else:
+                print(f"Garrison for {name}: empty")
+
+        except Exception as e:
+            print(f"Failed to parse garrison for at offset {garrison_start}: {e}")
+            garrison = []
         return garrison
+
+
+        #garrison = []
+        ## Read 7 creature IDs
+        #creature_ids = struct.unpack_from('<7I', self.raw, offset)
+        ## Read 7 creature amounts
+        #amounts = struct.unpack_from('<7I', self.raw, offset + 28)
+#
+        #for slot, (creature_id, amount) in enumerate(zip(creature_ids, amounts), 1):
+        #    if creature_id != 0xFFFFFFFF:
+        #        garrison.append({
+        #            'slot': slot,
+        #            'creature_id': creature_id,
+        #            'amount': amount
+        #        })
+        #return garrison
 
     def parse_heroes(self):
         """Populates and parses all savefile heroes in detail."""
