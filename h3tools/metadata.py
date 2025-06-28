@@ -1494,7 +1494,8 @@ class Savefile(object):
         self.towns = []
         self.detect_version()
         self.parse_metadata()
-        self.parse_towns()
+        #self.parse_towns()
+        self.find_towns_by_header()
         self.player_resources = self.extract_player_sections(self.raw)
 
         print(f"Player resources: {self.player_resources}")
@@ -1650,15 +1651,97 @@ class Savefile(object):
         logger.warning("No hero section found starting from offset 0x7530")
         return len(self.raw)  # Fallback to end of file if no heroes found
 
+    def find_towns_by_header(self):
+        
+        self.towns = []
+        TOWN_HEADER = b'\x71\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00'
+        for match in re.finditer(re.escape(TOWN_HEADER), self.raw):
+            header_offset = match.start()
+
+            # Assume the length byte is at (header_offset - 303 - X -2)
+            # Since we don't know X yet, try candidate values
+
+            max_name_length = 30  # reasonable max
+
+            for possible_len in range(3, max_name_length + 1):
+                name_start = header_offset - 303 - possible_len
+                length_byte = self.raw[name_start - 2]
+                separator = self.raw[name_start - 1]
+
+                if length_byte == possible_len and separator == 0x00:
+                    name_bytes = self.raw[name_start: name_start + possible_len]
+                    try:
+                        name = name_bytes.decode('ascii')
+                    except:
+                        name = "<decode error>"
+
+                    print(f"Found Town Name: {name}")
+                    print(f"Name starts at offset: {name_start}")
+                    print(f"Header offset: {header_offset}")
+
+                    coord_offset = name_start - 71 # Calculated manually
+                    #print(f"Coord bytes: {self.raw[coord_offset:coord_offset+10].hex()}")
+
+                    x = self.raw[coord_offset+4]
+                    y = self.raw[coord_offset+5]
+                    z = self.raw[coord_offset+6]
+                    level = 'Underground' if z == 1 else 'Surface'
+
+                    player = self.owner_colors.get(self.raw[coord_offset], "None")
+                    faction = self.faction_mapping.get(self.raw[coord_offset + 3])
+
+                    # Garrison section
+                    # Attempt 1
+
+                    garrison_offset = coord_offset + 9
+                    garrison = self.parse_garrison(garrison_offset)
+
+                    print(f"Faction: {faction}, player: {player}")
+                    print(f"x={x}, y={y}, level={level}")
+                    print(f"Garrison: {garrison}\n")
+
+                    town = {
+                        "name": name,
+                        "type": faction,
+                        "owner": player,
+                        "offset": name_start,
+                        "coords": [x, y, level],
+                        "garrison": garrison
+                    }
+                    self.towns.append(town)
+
+                    if self.town_section_start is None:
+                        self.town_section_start = name_start
+                        logger.info(f"First town found at offset 0x{name_start:08X} — stored as town_section_start")
+
+                    break
+                #return results
+
     def parse_towns(self):
         """Parse town data (name, faction, owner)."""
         TOWN_REGEX = re.compile(rb"(.{4})(.{2})([^\x00]{4,20}[\x00*@?HA-Z]?)", re.DOTALL)
+
+        #TOWN_HEADER = b'\x71\xff\xff\xff\xff\xff\xff'
+
+        #TOWN_REGEX = re.compile(
+        #    rb"(.{4})"                       # Flags (4 bytes)
+        #    rb"(.{2})"                       # Name length (2 bytes LE)
+        #    rb"([^\x00]{4,20}[\x00*@?HA-Z]?)" # Name bytes
+        #    rb".{83}"                        # Skip exactly 71 bytes (gap)
+        #    rb"\x71\xff\xff\xff\xff\xff\xff"         # Town header (exact bytes)
+        #    , re.DOTALL
+        #)
+
+        towns_by_header = self.find_towns_by_header()
+        print(f"Towns by header: {towns_by_header}")
 
         self.towns = []
         town_end = self.find_hero_section_start() - 63  # 63 normally unused byte shift
         print(f"Town section ends at: {town_end}")
         town_start = max(0,town_end - 10000)
         #logger.debug("Searching for towns from offset 0x%08X to 0x%08X", town_start, town_end)
+
+        #print(f"All town block: {self.raw[town_start:town_end].hex()}")
 
         matches = TOWN_REGEX.finditer(self.raw[town_start:town_end])
         #print("Regex pattern:", TOWN_REGEX.pattern)
@@ -1689,26 +1772,17 @@ class Savefile(object):
                 faction = self.faction_mapping.get(self.raw[coord_offset + 3])
                 
                 # Compute context region around name_end_offset
-                context_start = max(0, offset + 6 - 300)
-                context_end = name_end_offset + 300
+                context_start = max(0, offset - 100)
+                context_end = name_end_offset + 320
                 town_bytes = self.raw[context_start:context_end]
 
-                owner_offset = name_end_offset + 1
-                faction_offset = name_end_offset + 2
-
-                if faction_offset >= len(self.raw) or owner_offset >= len(self.raw):
-                    continue
 
                 # Garrison section
 
                 # Attempt 1
-                print(f"Garrison block: {self.raw[coord_offset:coord_offset + 70].hex()}")
-
+                
                 garrison_offset = coord_offset + 9
                 garrison = self.parse_garrison(garrison_offset)
-
-                print(f"Attempt1 garrison: {garrison}")
-
 
                 town = {
                     "name": name,
@@ -1725,9 +1799,12 @@ class Savefile(object):
                 # Print context bytes for ownership analysis
                 print(f"Town: {name} at offset: {offset} (name ends at: {name_end_offset})")
                 print(f"x={x}, y={y}, level={level}")
-                print(f"Bytes before coord: {self.raw[coord_offset-20:coord_offset+4].hex()}\n")
-                print(f"  Bytes before name start (-300 to -1): {town_bytes[:300].hex()}")
-                print(f"  Bytes after name end (+1 to +300): {town_bytes[300:].hex()}")
+                print(f"Garrison: {garrison}\n")
+                #print(f"Bytes before coord: {self.raw[coord_offset-20:coord_offset+4].hex()}\n")
+                print(f"Name bytes: {name_bytes.hex()}")
+                print(f"Town bytes: {town_bytes.hex()}")
+                #print(f"  Bytes before name start (-100 to -1): {town_bytes[:100].hex()}")
+                #print(f"  Bytes after name end (+1 to +320): {town_bytes[320:].hex()}")
 
                 
                 if self.town_section_start is None:
@@ -1767,13 +1844,13 @@ class Savefile(object):
                     creature_name = self.creature_mapping.get(cid, f"Unknown({cid})")
                     garrison.append({"id": cid, "name": creature_name, "count": count})
 
-            # 🐞 Debug output for garrison
-            if garrison:
-                print(f"Garrison:")
-                for slot in garrison:
-                    print(f"  - {slot['count']}x {slot['name']} (ID {slot['id']})")
-            else:
-                print(f"Garrison for {name}: empty")
+            # Debug output for garrison
+            #if garrison:
+            #    print(f"Garrison:")
+            #    for slot in garrison:
+            #        print(f"  - {slot['count']}x {slot['name']} (ID {slot['id']})")
+            #else:
+            #    print(f"Garrison looks empty")
 
         except Exception as e:
             print(f"Failed to parse garrison for at offset {garrison_start}: {e}")
