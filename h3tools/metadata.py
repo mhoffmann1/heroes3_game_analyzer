@@ -1274,6 +1274,186 @@ class Savefile(object):
         0x10: "Preserve"
     }
 
+    creature_mapping = {
+        0x00: "Pikeman",
+        0x01: "Halberdier",
+        0x02: "Archer",
+        0x03: "Marksman",
+        0x04: "Griffin",
+        0x05: "Royal Griffin",
+        0x06: "Swordsman",
+        0x07: "Crusader",
+        0x08: "Monk",
+        0x09: "Zealot",
+        0x0A: "Cavalier",
+        0x0B: "Champion",
+        0x0C: "Angel",
+        0x0D: "Archangel",
+        0x0E: "Centaur",
+        0x0F: "Centaur Captain",
+        0x10: "Dwarf",
+        0x11: "Battle Dwarf",
+        0x12: "Wood Elf",
+        0x13: "Grand Elf",
+        0x14: "Pegasus",
+        0x15: "Silver Pegasus",
+        0x16: "Dendroid Guard",
+        0x17: "Dendroid Soldier",
+        0x18: "Unicorn",
+        0x19: "War Unicorn",
+        0x1A: "Green Dragon",
+        0x1B: "Gold Dragon",
+        0x1C: "Gremlin",
+        0x1D: "Master Gremlin",
+        0x1E: "Stone Gargoyle",
+        0x1F: "Obsidian Gargoyle",
+        0x20: "Stone Golem",
+        0x21: "Iron Golem",
+        0x22: "Mage",
+        0x23: "Arch Mage",
+        0x24: "Genie",
+        0x25: "Master Genie",
+        0x26: "Naga",
+        0x27: "Naga Queen",
+        0x28: "Giant",
+        0x29: "Titan",
+        0x2A: "Imp",
+        0x2B: "Familiar",
+        0x2C: "Gog",
+        0x2D: "Magog",
+        0x2E: "Hell Hound",
+        0x2F: "Cerberus",
+        0x30: "Demon",
+        0x31: "Horned Demon",
+        0x32: "Pit Fiend",
+        0x33: "Pit Lord",
+        0x34: "Efreeti",
+        0x35: "Efreet Sultan",
+        0x36: "Devil",
+        0x37: "Arch Devil",
+        0x38: "Skeleton",
+        0x39: "Skeleton Warrior",
+        0x3A: "Walking Dead",
+        0x3B: "Zombie",
+        0x3C: "Wight",
+        0x3D: "Wraith",
+        0x3E: "Vampire",
+        0x3F: "Vampire Lord",
+        0x40: "Lich",
+        0x41: "Power Lich",
+        0x42: "Black Knight",
+        0x43: "Dread Knight",
+        0x44: "Bone Dragon",
+        0x45: "Ghost Dragon",
+        0x46: "Troglodyte",
+        0x47: "Infernal Troglodyte",
+        0x48: "Harpy",
+        0x49: "Harpy Hag",
+        0x4A: "Beholder",
+        0x4B: "Evil Eye",
+        0x4C: "Medusa",
+        0x4D: "Medusa Queen",
+        0x4E: "Minotaur",
+        0x4F: "Minotaur King",
+        0x50: "Manticore",
+        0x51: "Scorpicore",
+        0x52: "Red Dragon",
+        0x53: "Black Dragon",
+        0x54: "Goblin",
+        0x55: "Hobgoblin",
+        0x56: "Wolf Rider",
+        0x57: "Wolf Raider",
+        0x58: "Orc",
+        0x59: "Orc Chieftain",
+        0x5A: "Ogre",
+        0x5B: "Ogre Mage",
+        0x5C: "Roc",
+        0x5D: "Thunderbird",
+        0x5E: "Cyclops",
+        0x5F: "Cyclops King",
+        0x60: "Behemoth",
+        0x61: "Ancient Behemoth",
+        0x62: "Gnoll",
+        0x63: "Gnoll Marauder",
+        0x64: "Lizardman",
+        0x65: "Lizard Warrior",
+        0x66: "Gorgon",
+        0x67: "Mighty Gorgon",
+        0x68: "Serpent Fly",
+        0x69: "Dragon Fly",
+        0x6A: "Basilisk",
+        0x6B: "Greater Basilisk",
+        0x6C: "Wyvern",
+        0x6D: "Wyvern Monarch",
+        0x6E: "Hydra",
+        0x6F: "Chaos Hydra",
+        0x70: "Air Elemental",
+        0x71: "Earth Elemental",
+        0x72: "Fire Elemental",
+        0x73: "Water Elemental",
+        0x74: "Gold Golem",
+        0x75: "Diamond Golem",
+        0x76: "Pixie",
+        0x77: "Sprite",
+        0x78: "Psychic Elemental",
+        0x79: "Magic Elemental",
+        0x7B: "Ice Elemental",
+        0x7F: "Storm Elemental",
+        0x81: "Energy Elemental",
+        0x82: "Firebird",
+        0x83: "Phoenix",
+        0x84: "Azure Dragon",
+        0x85: "Crystal Dragon",
+        0x86: "Faerie Dragon",
+        0x87: "Rust Dragon",
+        0x88: "Enchanter",
+        0x89: "Sharpshooter",
+        0x8A: "Halfling",
+        0x8B: "Peasant",
+        0x8C: "Boar",
+        0x8D: "Mummy",
+        0x8E: "Nomad",
+        0x8F: "Rogue",
+        0x90: "Troll",
+        0x97: "Sea Dog",
+        0x99: "Nymph",
+        0x9A: "Oceanid",
+        0x9B: "Crew Mate",
+        0x9C: "Seaman",
+        0x9D: "Pirate",
+        0x9E: "Corsair",
+        0x9F: "Stormbird",
+        0xA0: "Ayssid",
+        0xA1: "Sea Witch",
+        0xA2: "Sorceress",
+        0xA3: "Nix",
+        0xA4: "Nix Warrior",
+        0xA5: "Sea Serpent",
+        0xA6: "Haspid",
+        0xA7: "Satyr",
+        0xA8: "Fangarm",
+        0xA9: "Leprechaun",
+        0xAA: "Steel Golem",
+        0xAB: "Halfling Grenadier",
+        0xAC: "Mechanic",
+        0xAD: "Engineer",
+        0xAE: "Armadillo",
+        0xAF: "Bellwether Armadillo",
+        0xB0: "Automaton",
+        0xB1: "Sentinel Automaton",
+        0xB2: "Sandworm",
+        0xB3: "Olgoi-Khorkhoi",
+        0xB4: "Gunslinger",
+        0xB5: "Bounty Hunter",
+        0xB6: "Couatl",
+        0xB7: "Crimson Couatl",
+        0xB8: "Dreadnought",
+        0xB9: "Juggernaut",
+
+        0xFFFFFFFF: "Empty Slot"
+    }
+
+
     def __init__(self, filename, parse_heroes=True):
         self.filename = filename
         self.raw      = None
@@ -1290,6 +1470,7 @@ class Savefile(object):
         self.player_resources = []
         self.read(parse_heroes)
         
+
 
     def patch(self, bytes, span):
         """Patches unpacked contents with bytes from span[0] to span[1]."""
@@ -1495,6 +1676,7 @@ class Savefile(object):
                 offset = m.start() + town_start + 6
                 name_end_offset = offset + 6 + len(name_bytes)
 
+                # Town metadata section - Type, owner, location
                 # 02 - Town_ID, 00 - Owner_ID (Player_ID), 08 - Conflux, 0D 05 00 - town's coordinates
                 coord_offset = offset-71 # Calculated manually
                 
@@ -1517,13 +1699,66 @@ class Savefile(object):
                 if faction_offset >= len(self.raw) or owner_offset >= len(self.raw):
                     continue
 
+                # Garrison section
+
+                # Attempt 1
+                print(f"Garrison block: {self.raw[coord_offset:coord_offset + 70].hex()}")
+
+                garrison_offset = coord_offset + 9
+                print(f"Garrison offset: {self.raw[garrison_offset]}")
+                while not self.raw[garrison_offset]:
+                    garrison_offset += 1
+                    print(f"Garrison offset: {self.raw[garrison_offset]}")
+                print(f"Garrison offset: {self.raw[garrison_offset]}")
+                garrison = self.parse_garrison(garrison_offset)
+
+                print(f"Attempt1 garrison: {garrison}")
+
+                # Attempt 2
+
+                garrison_start = coord_offset + 9
+                creature_ids = []
+                creature_counts = []
+
+                try:
+                    for i in range(7):
+                        id_offset = garrison_start + (i * 4)
+                        creature_id = int.from_bytes(self.raw[id_offset:id_offset + 4], 'little')
+                        creature_ids.append(creature_id)
+
+                    count_base = garrison_start + (7 * 4)
+                    for i in range(7):
+                        count_offset = count_base + (i * 4)
+                        creature_count = int.from_bytes(self.raw[count_offset:count_offset + 4], 'little')
+                        creature_counts.append(creature_count)
+
+                    garrison = []
+                    for cid, count in zip(creature_ids, creature_counts):
+                        if cid != 0xFFFFFFFF and count > 0:
+                            creature_name = self.creature_mapping.get(cid, f"Unknown({cid})")
+                            garrison.append({"id": cid, "name": creature_name, "count": count})
+
+                    # 🐞 Debug output for garrison
+                    if garrison:
+                        print(f"Garrison for {name}:")
+                        for slot in garrison:
+                            print(f"  - {slot['count']}x {slot['name']} (ID {slot['id']})")
+                    else:
+                        print(f"Garrison for {name}: empty")
+
+                except Exception as e:
+                    print(f"Failed to parse garrison for {name} at offset {garrison_start}: {e}")
+                    garrison = []
+
                 town = {
                     "name": name,
                     "type": faction,
                     "owner": player,
                     "offset": offset,
-                    "coords": [x, y, level]
+                    "coords": [x, y, level],
+                    "garrison": garrison
                 }
+
 
                 self.towns.append(town)
 
@@ -1531,6 +1766,8 @@ class Savefile(object):
                 print(f"Town: {name} at offset: {offset} (name ends at: {name_end_offset})")
                 print(f"x={x}, y={y}, level={level}")
                 print(f"Bytes before coord: {self.raw[coord_offset-20:coord_offset+4].hex()}\n")
+                print(f"  Bytes before name start (-300 to -1): {town_bytes[:300].hex()}")
+                print(f"  Bytes after name end (+1 to +300): {town_bytes[300:].hex()}")
 
                 
                 if self.town_section_start is None:
@@ -1546,6 +1783,22 @@ class Savefile(object):
 
         logger.info("Parsed %d towns: %s", len(self.towns), [t["name"] for t in self.towns])
         #logger.debug(self.towns)
+
+    def parse_garrison(self, offset):
+        garrison = []
+        # Read 7 creature IDs
+        creature_ids = struct.unpack_from('<7I', self.raw, offset)
+        # Read 7 creature amounts
+        amounts = struct.unpack_from('<7I', self.raw, offset + 28)
+
+        for slot, (creature_id, amount) in enumerate(zip(creature_ids, amounts), 1):
+            if creature_id != 0xFFFFFFFF:
+                garrison.append({
+                    'slot': slot,
+                    'creature_id': creature_id,
+                    'amount': amount
+                })
+        return garrison
 
     def parse_heroes(self):
         """Populates and parses all savefile heroes in detail."""
