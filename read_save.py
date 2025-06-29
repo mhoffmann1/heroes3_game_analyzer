@@ -10,21 +10,6 @@ import h3tools.metadata as metadata
 
 logger = logging.getLogger(__name__)
 
-# Hero-to-faction mapping (expanded for Horn of the Abyss)
-HERO_FACTION_MAP = {
-    "Adela": "Castle",
-    "Cyra": "Tower",
-    "Christian": "Castle",
-    "Gelu": "Rampart",
-    "Dracon": "Tower",
-    "Orrin": "Castle",
-    "Cuthbert": "Castle",
-    "Tazar": "Fortress",
-    "Alkin": "Fortress",
-    "Corkes": "Cove",
-    # Add more heroes as needed
-}
-
 def load_savegame(file_path):
     """Load a Heroes 3 savegame file."""
     if not os.path.exists(file_path):
@@ -141,7 +126,7 @@ def calculate_army_strength(army, attack_skill, defense_skill, ai_values):
     # Army strength = total AI Value * H
     return round(total_ai_value * H, 2)
 
-def extract_hero_stats(save, ai_values):
+def extract_game_data(save, ai_values):
     """Extract stats for all heroes and towns in the savegame."""
     heroes = []
 
@@ -159,11 +144,9 @@ def extract_hero_stats(save, ai_values):
                 artifact_spells  = set(y for x in hero.equipment.values()
                            for y in ARTIFACT_SPELLS.get(x, [])) if hero else set()
                 #print(artifact_spells)
-
                 
                 # Get hero name and faction
                 hero_name = getattr(hero, "name", "Unknown")
-                hero_faction = HERO_FACTION_MAP.get(hero_name, "Unknown")
                 
                 # Get army, filtering out empty slots
                 army = [
@@ -194,7 +177,6 @@ def extract_hero_stats(save, ai_values):
                         for skill in getattr(hero, "skills", [])
                         if hasattr(skill, "name") and skill.name
                     ],
-                    "faction": hero_faction,
                     "owner": hero.owner,
                     "army": army,
                     "army_strength": army_strength,
@@ -227,6 +209,53 @@ def save_to_json(data, output_file):
         json.dump(data, f, indent=4, ensure_ascii=False)
     logger.info("Hero stats, game info, and town data saved to '%s'", output_file)
 
+def aggregate_player_data(json_data):
+    players = {}
+    colors = ['Red', 'Blue', 'Tan', 'Green', 'Orange', 'Purple', 'Teal', 'Pink', 'None']
+    
+    # Initialize player data structure
+    for color in colors:
+        players[color] = {
+            'heroes': [],
+            'towns': [],
+            'resources': {}
+        }
+    
+    # Aggregate heroes by owner
+    for hero in json_data['heroes']:
+        owner = hero['owner'] if hero['owner'] else 'None'
+        if owner in players:
+            players[owner]['heroes'].append(hero)
+        else:
+            players['None']['heroes'].append(hero)
+    
+    print(f'Hero section done.')
+    # Aggregate towns by owner
+    for town in json_data['game_info']['towns']:
+        owner = town['owner']
+        if owner in players:
+            players[owner]['towns'].append(town)
+        else:
+            players['None']['towns'].append(town)
+    
+    print(f'Town section done.')
+    # Aggregate resources by color
+    for resource in json_data['resources']:
+        color = resource['color']
+        if color in players:
+            players[color]['resources'] = resource['resources']
+    
+    print(f'Resource section done.')
+    # Preserve game_info header and add total towns count
+    game_info = {k: v for k, v in json_data['game_info'].items() if k != 'towns'}
+    game_info['total_towns'] = len(json_data['game_info']['towns'])
+    
+    return {
+        'game_info': game_info,
+        'players': players
+        
+    }
+
 def main():
     parser = argparse.ArgumentParser(description="Extract hero stats, game info, and town data from Heroes 3 savegame to JSON.")
     parser.add_argument("savegame", help="Path to the Heroes 3 savegame file")
@@ -238,7 +267,7 @@ def main():
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
 
     try:
-        # Load AI values from creature_ai_values.json
+        # Load AI unit values from creature_ai_values.json
         try:
             with open("creature_ai_values.json", "r") as f:
                 ai_values = json.load(f)
@@ -252,11 +281,16 @@ def main():
         # Load savegame
         save = load_savegame(args.savegame)
         
-        # Extract hero stats, game info, and town data
-        data = extract_hero_stats(save, ai_values)
+        # Extract hero stats, game info, town data
+        raw_data = extract_game_data(save, ai_values)
+        save_to_json(raw_data, args.output)
+        print(f"Agrregating player data...")
+        player_data = aggregate_player_data(raw_data)
+        print(f"Player data: {player_data}")
+        save_to_json(player_data, 'player_data.json')
         
         # Save to JSON
-        save_to_json(data, args.output)
+        
         
     except Exception as e:
         logger.error("Error: %s", str(e))
