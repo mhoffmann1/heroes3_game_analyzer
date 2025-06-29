@@ -257,7 +257,6 @@ def aggregate_player_data(json_data):
 
     # Count number of controlled towns per player
     for player in colors:
-        print(f'Player: {players[player]}')
         players[player]['town_count'] = len(players[player]['towns'])
         players[player]['total_strength'] = get_army_strenght(players[player])
     
@@ -271,13 +270,11 @@ def get_army_strenght(player):
     total_strength = 0.0
 
     for hero in player['heroes']:
-        print(hero)
         total_strength += hero['army_strength']
         
     for town in player['towns']:
         total_strength += town['army_strength']
 
-    print(f'Total strenght: {total_strength}')
     return round(total_strength, 2)
 
 
