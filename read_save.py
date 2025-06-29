@@ -195,6 +195,13 @@ def extract_game_data(save, ai_values):
     # Parse game info from mapdata and towns
     mapdata = getattr(save, "mapdata", {})
     towns = getattr(save, "towns", [])
+
+    #print(f"towns: {towns}")
+    for town in towns:
+        army_strength = calculate_army_strength(town['garrison'], 0, 0, ai_values)
+        print(f"Town army strenght: {army_strength}")
+        town['army_strenght'] = army_strength
+
     resources = getattr(save, "player_resources")
     print(f"Resources: {resources}")
     logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
@@ -286,7 +293,6 @@ def main():
         save_to_json(raw_data, args.output)
         print(f"Agrregating player data...")
         player_data = aggregate_player_data(raw_data)
-        print(f"Player data: {player_data}")
         save_to_json(player_data, 'player_data.json')
         
         # Save to JSON

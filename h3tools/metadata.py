@@ -1605,10 +1605,10 @@ class Savefile(object):
                     break
 
             if match_score == player_count:
-                print(f"✅ Match found at offset 0x{offset:08X}")
+                #print(f"Match found at offset 0x{offset:08X}")
                 for section in candidate_blocks:
                     resource_str = ", ".join(f"{k}={v}" for k, v in section["resources"].items())
-                    print(f"[{section['color']}] Offset=0x{section['start_offset']:08X}, Resources: {resource_str}")
+                    #print(f"[{section['color']}] Offset=0x{section['start_offset']:08X}, Resources: {resource_str}")
                 player_sections.extend(candidate_blocks)
                 break  # Stop after first valid set
 
@@ -1675,9 +1675,9 @@ class Savefile(object):
                     except:
                         name = "<decode error>"
 
-                    print(f"Found Town Name: {name}")
-                    print(f"Name starts at offset: {name_start}")
-                    print(f"Header offset: {header_offset}")
+                    #print(f"Found Town Name: {name}")
+                    #print(f"Name starts at offset: {name_start}")
+                    #print(f"Header offset: {header_offset}")
 
                     coord_offset = name_start - 71 # Calculated manually
                     #print(f"Coord bytes: {self.raw[coord_offset:coord_offset+10].hex()}")
@@ -1844,34 +1844,11 @@ class Savefile(object):
                     creature_name = self.creature_mapping.get(cid, f"Unknown({cid})")
                     garrison.append({"id": cid, "name": creature_name, "count": count})
 
-            # Debug output for garrison
-            #if garrison:
-            #    print(f"Garrison:")
-            #    for slot in garrison:
-            #        print(f"  - {slot['count']}x {slot['name']} (ID {slot['id']})")
-            #else:
-            #    print(f"Garrison looks empty")
 
         except Exception as e:
             print(f"Failed to parse garrison for at offset {garrison_start}: {e}")
             garrison = []
         return garrison
-
-
-        #garrison = []
-        ## Read 7 creature IDs
-        #creature_ids = struct.unpack_from('<7I', self.raw, offset)
-        ## Read 7 creature amounts
-        #amounts = struct.unpack_from('<7I', self.raw, offset + 28)
-#
-        #for slot, (creature_id, amount) in enumerate(zip(creature_ids, amounts), 1):
-        #    if creature_id != 0xFFFFFFFF:
-        #        garrison.append({
-        #            'slot': slot,
-        #            'creature_id': creature_id,
-        #            'amount': amount
-        #        })
-        #return garrison
 
     def parse_heroes(self):
         """Populates and parses all savefile heroes in detail."""
@@ -1893,12 +1870,12 @@ class Savefile(object):
                 hero = h3tools.hero.Hero(name, version=self.version)
                 hero.set_file_data(blob, len(heroes), (start + pos, end + pos))  # Pass self.raw
                 
-                print(f"Found hero: {name} at offset: {pos+start-63} to {pos+end}")
+                #print(f"Found hero: {name} at offset: {pos+start-63} to {pos+end}")
                 fullblob = bytearray(self.raw[pos + start-63:pos + end])
                 ownership_byte = fullblob[0x20] if len(fullblob) > 0x20 else 255
                 hero.set_owner(ownership_byte)
                 #print(f"Ownership byte (0x20): 0x{ownership_byte:02X} ({ownership_byte})")
-                print(f"Player: {hero.owner}")
+                #print(f"Player: {hero.owner}")
                 heroes.append(hero)
                 pos += end
             else:
