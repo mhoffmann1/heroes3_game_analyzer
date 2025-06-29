@@ -11,6 +11,7 @@ from tqdm import tqdm
 import h3tools.metadata as metadata
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(filename='h3parser.log', encoding='utf-8', level=logging.DEBUG)
 
 def load_savegame(file_path):
     """Load a Heroes 3 savegame file."""
@@ -204,7 +205,7 @@ def extract_game_data(save, ai_values):
         town['army_strenght'] = army_strength
 
     resources = getattr(save, "player_resources")
-    logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
+    #logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
     game_info = parse_game_info(mapdata, towns)
     
     # Return both heroes and game info
@@ -374,12 +375,12 @@ def process_file(filepath, ai_values, output_file, save_individual=True):
     if save_individual:
         # Save raw data
         save_to_json(raw_data, output_file)
-        logging.info(f"Data saved to {output_file}")
+        #logging.info(f"Data saved to {output_file}")
 
         # Save player aggregated data
         player_output = output_file.replace(".json", "_player.json")
         save_to_json(player_data, player_output)
-        logging.info(f"Aggregated player data saved to {player_output}")
+        #logging.info(f"Aggregated player data saved to {player_output}")
 
     return raw_data, player_data
 

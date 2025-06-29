@@ -1608,11 +1608,6 @@ class Savefile(object):
                 player_sections.extend(candidate_blocks)
                 break  # Stop after first valid set
 
-        if not player_sections:
-            print("No valid 8-player block sequence found.")
-        else:
-            logger.info("Extracted %d player sections", len(player_sections))
-
         return player_sections
 
     def parse_metadata(self):
@@ -1650,9 +1645,11 @@ class Savefile(object):
     def find_towns_by_header(self):
         
         self.towns = []
-        TOWN_HEADER = b'\x71\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00'
-        for match in re.finditer(re.escape(TOWN_HEADER), self.raw):
+        TOWN_HEADER = b'[\x70\x71]\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00'
+        for match in re.finditer(TOWN_HEADER, self.raw):
             header_offset = match.start()
+
+            logger.debug(f"Found potential town data sector at: {match}")
 
             # Assume the length byte is at (header_offset - 303 - X -2)
             # Since we don't know X yet, try candidate values
@@ -1668,6 +1665,9 @@ class Savefile(object):
                     name_bytes = self.raw[name_start: name_start + possible_len]
                     try:
                         name = name_bytes.decode('ascii')
+                        logger.debug(f"Town: {name}")
+                        logger.debug(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
+                    
                     except:
                         name = "<decode error>"
 
