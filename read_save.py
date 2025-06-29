@@ -5,6 +5,8 @@ import h3tools
 import re
 import math
 import logging
+import sys
+from tqdm import tqdm
 
 import h3tools.metadata as metadata
 
@@ -199,11 +201,9 @@ def extract_game_data(save, ai_values):
     #print(f"towns: {towns}")
     for town in towns:
         army_strength = calculate_army_strength(town['garrison'], 0, 0, ai_values)
-        print(f"Town army strenght: {army_strength}")
         town['army_strenght'] = army_strength
 
     resources = getattr(save, "player_resources")
-    print(f"Resources: {resources}")
     logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
     game_info = parse_game_info(mapdata, towns)
     
@@ -236,7 +236,6 @@ def aggregate_player_data(json_data):
         else:
             players['None']['heroes'].append(hero)
     
-    print(f'Hero section done.')
     # Aggregate towns by owner
     for town in json_data['game_info']['towns']:
         owner = town['owner']
@@ -245,14 +244,12 @@ def aggregate_player_data(json_data):
         else:
             players['None']['towns'].append(town)
     
-    print(f'Town section done.')
     # Aggregate resources by color
     for resource in json_data['resources']:
         color = resource['color']
         if color in players:
             players[color]['resources'] = resource['resources']
     
-    print(f'Resource section done.')
     # Preserve game_info header and add total towns count
     game_info = {k: v for k, v in json_data['game_info'].items() if k != 'towns'}
     game_info['total_towns'] = len(json_data['game_info']['towns'])
@@ -264,43 +261,128 @@ def aggregate_player_data(json_data):
     }
 
 def main():
-    parser = argparse.ArgumentParser(description="Extract hero stats, game info, and town data from Heroes 3 savegame to JSON.")
-    parser.add_argument("savegame", help="Path to the Heroes 3 savegame file")
-    parser.add_argument("--output", "-o", default="hero_stats.json",
-                        help="Output JSON file (default: hero_stats.json)")
+    parser = argparse.ArgumentParser(
+        description="Extract hero stats, game info, and town data from Heroes 3 savegame(s) to JSON."
+    )
+    parser.add_argument(
+        "input",
+        help="Path to a Heroes 3 savegame file or a directory containing savegame files"
+    )
+    parser.add_argument(
+        "--output", "-o",
+        default="output_data",
+        help="Output file prefix or directory (default: output_data)"
+    )
     args = parser.parse_args()
 
     # Configure logging
-    logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logger = logging.getLogger(__name__)
 
     try:
-        # Load AI unit values from creature_ai_values.json
+        # Load AI unit values
         try:
             with open("creature_ai_values.json", "r") as f:
                 ai_values = json.load(f)
         except FileNotFoundError:
             logger.error("creature_ai_values.json not found in current directory")
-            exit(1)
+            sys.exit(1)
         except json.JSONDecodeError:
             logger.error("creature_ai_values.json is not a valid JSON file")
-            exit(1)
+            sys.exit(1)
 
-        # Load savegame
-        save = load_savegame(args.savegame)
-        
-        # Extract hero stats, game info, town data
-        raw_data = extract_game_data(save, ai_values)
-        save_to_json(raw_data, args.output)
-        print(f"Agrregating player data...")
-        player_data = aggregate_player_data(raw_data)
-        save_to_json(player_data, 'player_data.json')
-        
-        # Save to JSON
-        
-        
+        input_path = args.input
+
+        if os.path.isfile(input_path):
+            # Single file mode
+            logger.info(f"Processing single savegame: {input_path}")
+            raw_data, player_data = process_file(input_path, ai_values, args.output)
+
+            # Save raw data
+            save_to_json(raw_data, args.output)
+            logger.info(f"Raw data saved to {args.output}")
+
+            # Save player aggregated data
+            player_output = args.output.replace(".json", "_player.json")
+            save_to_json(player_data, player_output)
+            logger.info(f"Aggregated player data saved to {player_output}")
+
+        elif os.path.isdir(input_path):
+            # Batch processing mode
+            logger.info(f"Processing savegame directory: {input_path}")
+            pattern = re.compile(r"^\d{3}\.GM\d$", re.IGNORECASE)
+
+            files = sorted([
+                f for f in os.listdir(input_path)
+                if pattern.match(f)
+            ])
+
+            if not files:
+                logger.error("No valid savegame files found in the directory.")
+                sys.exit(1)
+
+            os.makedirs(args.output, exist_ok=True)
+
+            all_raw_data = []
+            all_player_data = []
+
+            for filename in tqdm(files, desc="Processing saves"):
+                filepath = os.path.join(input_path, filename)
+                try:
+                    raw_data, player_data = process_file(
+                        filepath,
+                        ai_values,
+                        os.path.join(args.output, filename + ".json"),
+                        save_individual=False
+                    )
+
+                    raw_data["filename"] = filename
+                    player_data["filename"] = filename
+
+                    all_raw_data.append(raw_data)
+                    all_player_data.append(player_data)
+
+                except Exception as e:
+                    logger.error(f"Failed to process {filename}: {e}")
+
+            combined_output = os.path.join(args.output, "combined_data.json")
+            save_to_json(all_raw_data, combined_output)
+            logger.info(f"Combined raw data saved to {combined_output}")
+
+            combined_player_output = os.path.join(args.output, "combined_player_data.json")
+            save_to_json(all_player_data, combined_player_output)
+            logger.info(f"Combined player data saved to {combined_player_output}")
+
+        else:
+            logger.error("Input path is neither a file nor a directory.")
+            sys.exit(1)
+
     except Exception as e:
-        logger.error("Error: %s", str(e))
-        exit(1)
+        logger.error("Unhandled error: %s", str(e))
+        sys.exit(1)
+
+
+def process_file(filepath, ai_values, output_file, save_individual=True):
+    save = load_savegame(filepath)
+    raw_data = extract_game_data(save, ai_values)
+    player_data = aggregate_player_data(raw_data)
+
+    if save_individual:
+        # Save raw data
+        save_to_json(raw_data, output_file)
+        logging.info(f"Data saved to {output_file}")
+
+        # Save player aggregated data
+        player_output = output_file.replace(".json", "_player.json")
+        save_to_json(player_data, player_output)
+        logging.info(f"Aggregated player data saved to {player_output}")
+
+    return raw_data, player_data
+
+
+def save_to_json(data, filename):
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=2)
 
 if __name__ == "__main__":
     main()

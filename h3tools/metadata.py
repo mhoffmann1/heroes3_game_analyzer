@@ -1498,8 +1498,6 @@ class Savefile(object):
         self.find_towns_by_header()
         self.player_resources = self.extract_player_sections(self.raw)
 
-        print(f"Player resources: {self.player_resources}")
-        
         if parse_heroes: self.parse_heroes()
         self.update_info()
         logger.info("Opened %s (%s, unzipped %s).", self.filename,
@@ -1569,8 +1567,6 @@ class Savefile(object):
 
         start_offset = max(0, self.town_section_start - search_window_size)
         end_offset = self.town_section_start
-
-        print(f"Scanning from 0x{start_offset:08X} to 0x{end_offset + block_size:08X} for player block pattern...")
 
         for offset in range(start_offset, end_offset + block_size):
             # Try to read the first block
@@ -1675,10 +1671,6 @@ class Savefile(object):
                     except:
                         name = "<decode error>"
 
-                    #print(f"Found Town Name: {name}")
-                    #print(f"Name starts at offset: {name_start}")
-                    #print(f"Header offset: {header_offset}")
-
                     coord_offset = name_start - 71 # Calculated manually
                     #print(f"Coord bytes: {self.raw[coord_offset:coord_offset+10].hex()}")
 
@@ -1691,14 +1683,8 @@ class Savefile(object):
                     faction = self.faction_mapping.get(self.raw[coord_offset + 3])
 
                     # Garrison section
-                    # Attempt 1
-
                     garrison_offset = coord_offset + 9
                     garrison = self.parse_garrison(garrison_offset)
-
-                    print(f"Faction: {faction}, player: {player}")
-                    print(f"x={x}, y={y}, level={level}")
-                    print(f"Garrison: {garrison}\n")
 
                     town = {
                         "name": name,
@@ -1716,110 +1702,6 @@ class Savefile(object):
 
                     break
                 #return results
-
-    def parse_towns(self):
-        """Parse town data (name, faction, owner)."""
-        TOWN_REGEX = re.compile(rb"(.{4})(.{2})([^\x00]{4,20}[\x00*@?HA-Z]?)", re.DOTALL)
-
-        #TOWN_HEADER = b'\x71\xff\xff\xff\xff\xff\xff'
-
-        #TOWN_REGEX = re.compile(
-        #    rb"(.{4})"                       # Flags (4 bytes)
-        #    rb"(.{2})"                       # Name length (2 bytes LE)
-        #    rb"([^\x00]{4,20}[\x00*@?HA-Z]?)" # Name bytes
-        #    rb".{83}"                        # Skip exactly 71 bytes (gap)
-        #    rb"\x71\xff\xff\xff\xff\xff\xff"         # Town header (exact bytes)
-        #    , re.DOTALL
-        #)
-
-        towns_by_header = self.find_towns_by_header()
-        print(f"Towns by header: {towns_by_header}")
-
-        self.towns = []
-        town_end = self.find_hero_section_start() - 63  # 63 normally unused byte shift
-        print(f"Town section ends at: {town_end}")
-        town_start = max(0,town_end - 10000)
-        #logger.debug("Searching for towns from offset 0x%08X to 0x%08X", town_start, town_end)
-
-        #print(f"All town block: {self.raw[town_start:town_end].hex()}")
-
-        matches = TOWN_REGEX.finditer(self.raw[town_start:town_end])
-        #print("Regex pattern:", TOWN_REGEX.pattern)
-
-        for m in matches:
-            try:
-                flags = m.group(1)
-                name_len = util.bytoi(m.group(2))
-                name_bytes = m.group(3).rstrip(b"\x00")
-                name = name_bytes.decode("latin-1").rstrip("*@?ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-
-                if not all(32 <= ord(c) <= 126 for c in name):
-                    continue
-
-                offset = m.start() + town_start + 6
-                name_end_offset = offset + 6 + len(name_bytes)
-
-                # Town metadata section - Type, owner, location
-                # 02 - Town_ID, 00 - Owner_ID (Player_ID), 08 - Conflux, 0D 05 00 - town's coordinates
-                coord_offset = offset-71 # Calculated manually
-                
-                x = self.raw[coord_offset+4]
-                y = self.raw[coord_offset+5]
-                z = self.raw[coord_offset+6]
-                level = 'Underground' if z == 1 else 'Surface'
-                
-                player = self.owner_colors.get(self.raw[coord_offset], "None")
-                faction = self.faction_mapping.get(self.raw[coord_offset + 3])
-                
-                # Compute context region around name_end_offset
-                context_start = max(0, offset - 100)
-                context_end = name_end_offset + 320
-                town_bytes = self.raw[context_start:context_end]
-
-
-                # Garrison section
-
-                # Attempt 1
-                
-                garrison_offset = coord_offset + 9
-                garrison = self.parse_garrison(garrison_offset)
-
-                town = {
-                    "name": name,
-                    "type": faction,
-                    "owner": player,
-                    "offset": offset,
-                    "coords": [x, y, level],
-                    "garrison": garrison
-                }
-
-
-                self.towns.append(town)
-
-                # Print context bytes for ownership analysis
-                print(f"Town: {name} at offset: {offset} (name ends at: {name_end_offset})")
-                print(f"x={x}, y={y}, level={level}")
-                print(f"Garrison: {garrison}\n")
-                #print(f"Bytes before coord: {self.raw[coord_offset-20:coord_offset+4].hex()}\n")
-                print(f"Name bytes: {name_bytes.hex()}")
-                print(f"Town bytes: {town_bytes.hex()}")
-                #print(f"  Bytes before name start (-100 to -1): {town_bytes[:100].hex()}")
-                #print(f"  Bytes after name end (+1 to +320): {town_bytes[320:].hex()}")
-
-                
-                if self.town_section_start is None:
-                    self.town_section_start = offset
-                    logger.info(f"First town found at offset 0x{offset:08X} — stored as town_section_start")
-
-            except (UnicodeDecodeError, struct.error) as e:
-                logger.debug(
-                    "Failed to parse town at offset 0x%08X: %s (raw: %r, flags: %r, name_len: %d, match: %r)",
-                    m.start() + town_start, str(e), name_bytes, flags, name_len, m.group(0)
-                )
-                continue
-
-        logger.info("Parsed %d towns: %s", len(self.towns), [t["name"] for t in self.towns])
-        #logger.debug(self.towns)
 
     def parse_garrison(self, offset):
         garrison_start = offset
