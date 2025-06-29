@@ -1,12 +1,17 @@
-import os
-import json
 import argparse
-import pandas as pd
+import json
+import logging
+import os
+
 import dash
-from dash import dcc, html, dash_table
-from dash.dependencies import Input, Output
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from dash import dash_table, dcc, html
+from dash.dependencies import Input, Output
+
+logger = logging.getLogger(__package__)
+
 
 
 def load_combined_data(directory):
@@ -38,7 +43,7 @@ def parse_data(data):
             if isinstance(heroes, list):
                 for hero_data in heroes:
                     hero_name = hero_data.get("name", "Unknown")
-                    hero_rows.append({
+                    hero = {
                         "day": day,
                         "player_color": player_color.capitalize(),
                         "hero_name": hero_name,
@@ -48,10 +53,13 @@ def parse_data(data):
                         "defense": hero_data.get("primary_skills", {}).get("defense", 0),
                         "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
                         "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0)
-                    })
+                    }
+                    if not all(isinstance(val, int) for val in [hero['attack'], hero["defense"],hero["power"],hero["knowledge"]]):
+                        continue
+                    hero_rows.append(hero)
             elif isinstance(heroes, dict):
                 for hero_name, hero_data in heroes.items():
-                    hero_rows.append({
+                    hero = {
                         "day": day,
                         "player_color": player_color.capitalize(),
                         "hero_name": hero_name,
@@ -61,7 +69,11 @@ def parse_data(data):
                         "defense": hero_data.get("primary_skills", {}).get("defense", 0),
                         "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
                         "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0)
-                    })
+                    }
+                    if not all(isinstance(val, int) for val in [hero['attack'], hero["defense"],hero["power"],hero["knowledge"]]):
+                        logger.debug(f"Detected hero {hero_name} with invalid skill value.")
+                        continue
+                    hero_rows.append(hero)
 
             # Player-level data
             player_rows.append({
@@ -107,6 +119,21 @@ def run_dashboard(df_heroes, df_players, game_info, port):
     hero_options = sorted(df_heroes["hero_name"].dropna().unique())
     metric_options = ["experience", "army_strength", "attack", "defense", "power", "knowledge"]
     player_metric_options = ["gold", "wood", "ore", "mercury", "sulfur", "crystal", "gems", "town_count"]
+
+    PLAYER_COLORS = {
+        "Red": "#FF0000",
+        "Blue": "#0000FF",
+        "Tan": "#D2B48C",
+        "Green": "#00A000",
+        "Orange": "#FFA500",
+        "Purple": "#800080",
+        "Teal": "#008080",
+        "Pink": "#FF69B4",
+        "None": "#808080",   # Grey for 'None' player
+    }
+
+    PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
+
 
     app.layout = html.Div([
         html.H1("Heroes 3 Savegame Analyzer Dashboard"),
@@ -167,6 +194,18 @@ def run_dashboard(df_heroes, df_players, game_info, port):
         dcc.Graph(id="player_chart"),
 
         html.H2("Town Ownership Distribution"),
+
+        html.Label("Select Day"),
+        dcc.Slider(
+            id="day_slider",
+            min=df_players["day"].min(),
+            max=df_players["day"].max(),
+            step=1,
+            value=df_players["day"].max(),
+            marks={int(day): str(int(day)) for day in sorted(df_players["day"].unique())},
+            tooltip={"placement": "bottom", "always_visible": True}
+        ),
+
         dcc.Graph(id="town_pie_chart")
     ])
 
@@ -226,48 +265,63 @@ def run_dashboard(df_heroes, df_players, game_info, port):
     def update_player_chart(selected_players, selected_metrics):
         if not selected_players or not selected_metrics:
             return go.Figure()
-
+    
         filtered = df_players[df_players["player_color"].isin(selected_players)]
         fig = go.Figure()
-
+    
         for metric in selected_metrics:
-            for player, group in filtered.groupby("player_color"):
+            for player in PLAYER_ORDER:
+                if player not in selected_players:
+                    continue
+                group = filtered[filtered["player_color"] == player]
+                if group.empty:
+                    continue
+                
+                color = PLAYER_COLORS.get(player, "#000000")  # fallback to black if not defined
+    
                 fig.add_trace(go.Scatter(
                     x=group["day"],
                     y=group[metric],
                     mode="lines+markers",
-                    name=f"{player} - {metric.capitalize()}"
+                    name=f"{player} - {metric.capitalize()}",
+                    line=dict(color=color),
+                    marker=dict(color=color)
                 ))
-
+    
         fig.update_layout(
             title="Player Metrics Over Time",
             xaxis_title="Game Day",
             yaxis_title="Value",
-            hovermode="x unified"
+            hovermode="x unified",
+            legend=dict(traceorder="normal")  # Keep the order in which traces are added
         )
         return fig
 
     # Pie chart for town ownership (latest day)
     @app.callback(
         Output("town_pie_chart", "figure"),
-        Input("player_selector", "value")
+        Input("player_selector", "value"),
+        Input("day_slider", "value")
     )
-    def update_town_pie(selected_players):
-        if df_players.empty:
+    def update_town_pie(selected_players, selected_day):
+        if df_players.empty or selected_day is None:
             return go.Figure()
-
-        latest_day = df_players["day"].max()
-        latest = df_players[df_players["day"] == latest_day]
-
-        filtered = latest[latest["player_color"].isin(selected_players)]
-
+    
+        current = df_players[df_players["day"] == selected_day]
+        filtered = current[current["player_color"].isin(selected_players)]
+    
+        if filtered.empty:
+            return go.Figure()
+    
         fig = px.pie(
             filtered,
             names="player_color",
             values="town_count",
-            title=f"Town Ownership on Day {latest_day}"
+            title=f"Town Ownership on Day {selected_day}",
+            color="player_color",
+            color_discrete_map=PLAYER_COLORS
         )
-
+    
         return fig
 
     app.run(debug=True, port=port)

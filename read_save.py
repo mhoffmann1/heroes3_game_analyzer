@@ -202,7 +202,7 @@ def extract_game_data(save, ai_values):
     #print(f"towns: {towns}")
     for town in towns:
         army_strength = calculate_army_strength(town['garrison'], 0, 0, ai_values)
-        town['army_strenght'] = army_strength
+        town['army_strength'] = army_strength
 
     resources = getattr(save, "player_resources")
     #logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
@@ -257,13 +257,29 @@ def aggregate_player_data(json_data):
 
     # Count number of controlled towns per player
     for player in colors:
+        print(f'Player: {players[player]}')
         players[player]['town_count'] = len(players[player]['towns'])
+        players[player]['total_strength'] = get_army_strenght(players[player])
     
     return {
         'game_info': game_info,
         'players': players
         
     }
+
+def get_army_strenght(player):
+    total_strength = 0.0
+
+    for hero in player['heroes']:
+        print(hero)
+        total_strength += hero['army_strength']
+        
+    for town in player['towns']:
+        total_strength += town['army_strength']
+
+    print(f'Total strenght: {total_strength}')
+    return round(total_strength, 2)
+
 
 def main():
     parser = argparse.ArgumentParser(

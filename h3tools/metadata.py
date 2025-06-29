@@ -1649,7 +1649,7 @@ class Savefile(object):
         for match in re.finditer(TOWN_HEADER, self.raw):
             header_offset = match.start()
 
-            logger.debug(f"Found potential town data sector at: {match}")
+            #logger.debug(f"Found potential town data sector at: {match}")
 
             # Assume the length byte is at (header_offset - 303 - X -2)
             # Since we don't know X yet, try candidate values
@@ -1665,8 +1665,8 @@ class Savefile(object):
                     name_bytes = self.raw[name_start: name_start + possible_len]
                     try:
                         name = name_bytes.decode('ascii')
-                        logger.debug(f"Town: {name}")
-                        logger.debug(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
+                        #logger.debug(f"Town: {name}")
+                        #logger.debug(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
                     
                     except:
                         name = "<decode error>"
