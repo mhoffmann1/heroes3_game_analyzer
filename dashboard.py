@@ -6,6 +6,7 @@ import dash
 from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
 import plotly.express as px
+import plotly.graph_objects as go
 
 
 def load_combined_data(directory):
@@ -19,7 +20,8 @@ def load_combined_data(directory):
 
 
 def parse_data(data):
-    rows = []
+    hero_rows = []
+    player_rows = []
     game_info = None
 
     for entry in data:
@@ -31,11 +33,12 @@ def parse_data(data):
 
         players = entry.get("players", {})
         for player_color, player_data in players.items():
+            # Hero data
             heroes = player_data.get("heroes", {})
             if isinstance(heroes, list):
                 for hero_data in heroes:
                     hero_name = hero_data.get("name", "Unknown")
-                    row = {
+                    hero_rows.append({
                         "day": day,
                         "player_color": player_color.capitalize(),
                         "hero_name": hero_name,
@@ -45,11 +48,10 @@ def parse_data(data):
                         "defense": hero_data.get("primary_skills", {}).get("defense", 0),
                         "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
                         "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0)
-                    }
-                    rows.append(row)
+                    })
             elif isinstance(heroes, dict):
                 for hero_name, hero_data in heroes.items():
-                    row = {
+                    hero_rows.append({
                         "day": day,
                         "player_color": player_color.capitalize(),
                         "hero_name": hero_name,
@@ -59,10 +61,26 @@ def parse_data(data):
                         "defense": hero_data.get("primary_skills", {}).get("defense", 0),
                         "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
                         "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0)
-                    }
-                    rows.append(row)
-    df = pd.DataFrame(rows)
-    return df, game_info
+                    })
+
+            # Player-level data
+            player_rows.append({
+                "day": day,
+                "player_color": player_color.capitalize(),
+                "gold": player_data.get("resources", {}).get("gold", 0),
+                "wood": player_data.get("resources", {}).get("wood", 0),
+                "ore": player_data.get("resources", {}).get("ore", 0),
+                "mercury": player_data.get("resources", {}).get("mercury", 0),
+                "sulfur": player_data.get("resources", {}).get("sulfur", 0),
+                "crystal": player_data.get("resources", {}).get("crystals", 0),
+                "gems": player_data.get("resources", {}).get("gems", 0),
+                "town_count": player_data.get("town_count", 0)
+            })
+
+    df_heroes = pd.DataFrame(hero_rows)
+    df_players = pd.DataFrame(player_rows)
+
+    return df_heroes, df_players, game_info
 
 
 def parse_day_from_filename(filename):
@@ -81,13 +99,14 @@ def parse_day_from_filename(filename):
     return None
 
 
-def run_dashboard(df, game_info, port):
+def run_dashboard(df_heroes, df_players, game_info, port):
     app = dash.Dash(__name__)
     server = app.server
 
-    player_options = sorted(df["player_color"].dropna().unique())
-    hero_options = sorted(df["hero_name"].dropna().unique())
+    player_options = sorted(df_heroes["player_color"].dropna().unique())
+    hero_options = sorted(df_heroes["hero_name"].dropna().unique())
     metric_options = ["experience", "army_strength", "attack", "defense", "power", "knowledge"]
+    player_metric_options = ["gold", "wood", "ore", "mercury", "sulfur", "crystal", "gems", "town_count"]
 
     app.layout = html.Div([
         html.H1("Heroes 3 Savegame Analyzer Dashboard"),
@@ -102,6 +121,8 @@ def run_dashboard(df, game_info, port):
         ], style={"marginBottom": "30px"}),
 
         html.Div([
+            html.H2("Hero Metrics Over Time"),
+
             html.Label("Select Players"),
             dcc.Dropdown(
                 id="player_selector",
@@ -118,7 +139,7 @@ def run_dashboard(df, game_info, port):
                 multi=True
             ),
 
-            html.Label("Select Metrics"),
+            html.Label("Select Hero Metrics"),
             dcc.Dropdown(
                 id="metric_selector",
                 options=[{"label": m.capitalize(), "value": m} for m in metric_options],
@@ -127,20 +148,41 @@ def run_dashboard(df, game_info, port):
             ),
         ], style={"width": "50%", "marginBottom": "30px"}),
 
-        dcc.Graph(id="line_chart")
+        dcc.Graph(id="line_chart"),
+
+        html.Hr(),
+
+        html.Div([
+            html.H2("Player Metrics Over Time"),
+
+            html.Label("Select Player Metrics"),
+            dcc.Dropdown(
+                id="player_metric_selector",
+                options=[{"label": m.capitalize(), "value": m} for m in player_metric_options],
+                value=["gold", "town_count"],
+                multi=True
+            ),
+        ], style={"width": "50%", "marginBottom": "30px"}),
+
+        dcc.Graph(id="player_chart"),
+
+        html.H2("Town Ownership Distribution"),
+        dcc.Graph(id="town_pie_chart")
     ])
 
+    # Update hero selector based on player selection
     @app.callback(
         Output("hero_selector", "options"),
         Output("hero_selector", "value"),
         Input("player_selector", "value")
     )
     def update_hero_selector(selected_players):
-        filtered = df[df["player_color"].isin(selected_players)]
+        filtered = df_heroes[df_heroes["player_color"].isin(selected_players)]
         heroes = sorted(filtered["hero_name"].dropna().unique())
         options = [{"label": h, "value": h} for h in heroes]
         return options, heroes
 
+    # Update line chart for heroes
     @app.callback(
         Output("line_chart", "figure"),
         Input("player_selector", "value"),
@@ -149,23 +191,23 @@ def run_dashboard(df, game_info, port):
     )
     def update_chart(selected_players, selected_heroes, selected_metrics):
         if not selected_players or not selected_heroes or not selected_metrics:
-            return px.line(title="No data selected")
+            return go.Figure()
 
-        filtered = df[
-            (df["player_color"].isin(selected_players)) &
-            (df["hero_name"].isin(selected_heroes))
+        filtered = df_heroes[
+            (df_heroes["player_color"].isin(selected_players)) &
+            (df_heroes["hero_name"].isin(selected_heroes))
         ]
 
-        fig = px.line()
+        fig = go.Figure()
 
         for metric in selected_metrics:
             for (player, hero), group in filtered.groupby(["player_color", "hero_name"]):
-                fig.add_scatter(
+                fig.add_trace(go.Scatter(
                     x=group["day"],
                     y=group[metric],
                     mode="lines+markers",
                     name=f"{hero} ({player}) - {metric.capitalize()}"
-                )
+                ))
 
         fig.update_layout(
             title="Hero Progress Over Time",
@@ -175,6 +217,59 @@ def run_dashboard(df, game_info, port):
         )
         return fig
 
+    # Player-level chart
+    @app.callback(
+        Output("player_chart", "figure"),
+        Input("player_selector", "value"),
+        Input("player_metric_selector", "value")
+    )
+    def update_player_chart(selected_players, selected_metrics):
+        if not selected_players or not selected_metrics:
+            return go.Figure()
+
+        filtered = df_players[df_players["player_color"].isin(selected_players)]
+        fig = go.Figure()
+
+        for metric in selected_metrics:
+            for player, group in filtered.groupby("player_color"):
+                fig.add_trace(go.Scatter(
+                    x=group["day"],
+                    y=group[metric],
+                    mode="lines+markers",
+                    name=f"{player} - {metric.capitalize()}"
+                ))
+
+        fig.update_layout(
+            title="Player Metrics Over Time",
+            xaxis_title="Game Day",
+            yaxis_title="Value",
+            hovermode="x unified"
+        )
+        return fig
+
+    # Pie chart for town ownership (latest day)
+    @app.callback(
+        Output("town_pie_chart", "figure"),
+        Input("player_selector", "value")
+    )
+    def update_town_pie(selected_players):
+        if df_players.empty:
+            return go.Figure()
+
+        latest_day = df_players["day"].max()
+        latest = df_players[df_players["day"] == latest_day]
+
+        filtered = latest[latest["player_color"].isin(selected_players)]
+
+        fig = px.pie(
+            filtered,
+            names="player_color",
+            values="town_count",
+            title=f"Town Ownership on Day {latest_day}"
+        )
+
+        return fig
+
     app.run(debug=True, port=port)
 
 
@@ -182,7 +277,7 @@ def main():
     parser = argparse.ArgumentParser(description="Heroes 3 Savegame Dashboard")
     parser.add_argument(
         "input_dir",
-        help="Directory containing combined_data.json"
+        help="Directory containing combined_player_data.json"
     )
     parser.add_argument(
         "--port",
@@ -193,9 +288,9 @@ def main():
     args = parser.parse_args()
 
     data = load_combined_data(args.input_dir)
-    df, game_info = parse_data(data)
+    df_heroes, df_players, game_info = parse_data(data)
 
-    run_dashboard(df, game_info, args.port)
+    run_dashboard(df_heroes, df_players, game_info, args.port)
 
 
 if __name__ == "__main__":

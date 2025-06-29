@@ -2,7 +2,29 @@
 
 ## How to run
 
-python3 -m http.server 8000
+To decompress single save for manual analysys:
+
+```bash
+python decompress_gm.py saves/red_3cities.GM2 -o saves/red_3cities.bin
+```
+
+To generate json files from single savefile:
+
+```bash
+python3 read_save.py saves/244.GM2
+```
+
+To generate json files for entire game:
+
+```bash
+python3 read_save.py games/2024.11.05_2139_default -o 2024_11_05
+```
+
+To run dashboard:
+
+```bash
+python dashboard.py 2024_11_05/ --port 8080
+```
 
 ## Current state
 
@@ -11,24 +33,6 @@ python3 -m http.server 8000
 
 ## To do
 
-Link heroes to players: https://github.com/redxu/HoMM3_FA/blob/master/FA_struct.h#L12
-
-
-
-Town regex:
-
-🔥 Reliable Regex Match:
-To match town names with the post-name marker:
-
-css
-Kopiuj
-Edytuj
-([\x01-\x0C].{1,12})\x04\x30\x2b\x05\x05\x58\x66\x19\x00
-[\x01-\x0C]: length prefix (max town name length is 12).
-
-.{1,12}: the town name itself.
-
-Followed by the fixed marker.
 
 ## issues
 
@@ -40,5 +44,4 @@ Warning: AI Value not found for unit 'Leprechaun'
 
 Percentage of map discovered
 Number of Dragon Utopia Visited
-Number of towns
 DD, TP, Fly - mark if available to hero

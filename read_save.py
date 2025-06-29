@@ -253,6 +253,10 @@ def aggregate_player_data(json_data):
     # Preserve game_info header and add total towns count
     game_info = {k: v for k, v in json_data['game_info'].items() if k != 'towns'}
     game_info['total_towns'] = len(json_data['game_info']['towns'])
+
+    # Count number of controlled towns per player
+    for player in colors:
+        players[player]['town_count'] = len(players[player]['towns'])
     
     return {
         'game_info': game_info,
@@ -270,7 +274,7 @@ def main():
     )
     parser.add_argument(
         "--output", "-o",
-        default="output_data",
+        default="output_data.json",
         help="Output file prefix or directory (default: output_data)"
     )
     args = parser.parse_args()
