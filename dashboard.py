@@ -52,7 +52,10 @@ def parse_data(data):
                         "attack": hero_data.get("primary_skills", {}).get("attack", 0),
                         "defense": hero_data.get("primary_skills", {}).get("defense", 0),
                         "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
-                        "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0)
+                        "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0),
+                        "has_dd": hero_data.get("has_dd", False),
+                        "has_fly": hero_data.get("has_fly", False),
+                        "has_tp": hero_data.get("has_tp", False),
                     }
                     if not all(isinstance(val, int) for val in [hero['attack'], hero["defense"],hero["power"],hero["knowledge"]]):
                         continue
@@ -68,7 +71,10 @@ def parse_data(data):
                         "attack": hero_data.get("primary_skills", {}).get("attack", 0),
                         "defense": hero_data.get("primary_skills", {}).get("defense", 0),
                         "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
-                        "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0)
+                        "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0),
+                        "has_dd": hero_data.get("has_dd", False),
+                        "has_fly": hero_data.get("has_fly", False),
+                        "has_tp": hero_data.get("has_tp", False),
                     }
                     if not all(isinstance(val, int) for val in [hero['attack'], hero["defense"],hero["power"],hero["knowledge"]]):
                         logger.debug(f"Detected hero {hero_name} with invalid skill value.")
@@ -207,7 +213,23 @@ def run_dashboard(df_heroes, df_players, game_info, port):
             tooltip={"placement": "bottom", "always_visible": True}
         ),
 
-        dcc.Graph(id="town_pie_chart")
+        dcc.Graph(id="town_pie_chart"),
+
+        html.H2("Spell Availability Over Time"),
+
+        html.Label("Select Spell:"),
+        dcc.Dropdown(
+            id="spell_selector",
+            options=[
+                {"label": "Dimension Door", "value": "has_dd"},
+                {"label": "Fly", "value": "has_fly"},
+                {"label": "Town Portal", "value": "has_tp"}
+            ],
+            value="has_dd",  # Default to Dimension Door
+            clearable=False
+        ),
+
+        dcc.Graph(id="spell_chart"),
     ])
 
     # Update hero selector based on player selection
@@ -321,6 +343,72 @@ def run_dashboard(df_heroes, df_players, game_info, port):
             title=f"Town Ownership on Day {selected_day}",
             color="player_color",
             color_discrete_map=PLAYER_COLORS
+        )
+
+        return fig
+    
+    # Spell availability
+    @app.callback(
+        Output("spell_chart", "figure"),
+        Input("player_selector", "value"),
+        Input("spell_selector", "value")
+    )
+    def update_spell_chart(selected_players, selected_spell):
+        if not selected_players or not selected_spell:
+            return go.Figure()
+
+        spell_names = {
+            "has_dd": "Dimension Door",
+            "has_fly": "Fly",
+            "has_tp": "Town Portal"
+        }
+
+        df = df_heroes.copy()
+
+        # Prepare data
+        records = []
+        for day in sorted(df["day"].dropna().unique()):
+            daily = df[df["day"] <= day]
+            for player in selected_players:
+                player_daily = daily[daily["player_color"] == player]
+                has_spell = player_daily[selected_spell].any()
+                records.append({
+                    "day": day,
+                    "player_color": player,
+                    "available": int(has_spell)
+                })
+
+        df_spells = pd.DataFrame(records)
+
+        # Plot
+        fig = go.Figure()
+
+        for player in selected_players:
+            group = df_spells[df_spells["player_color"] == player]
+            if group.empty:
+                continue
+
+            color = PLAYER_COLORS.get(player, "#000000")
+
+            fig.add_trace(go.Scatter(
+                x=group["day"],
+                y=group["available"],
+                mode="lines+markers",
+                name=player,
+                line=dict(shape="hv", color=color),
+                marker=dict(color=color)
+            ))
+
+        fig.update_layout(
+            title=f"{spell_names[selected_spell]} Availability Over Time",
+            xaxis_title="Game Day",
+            yaxis=dict(
+                title="Availability",
+                tickmode="array",
+                tickvals=[0, 1],
+                ticktext=["Not Available", "Available"]
+            ),
+            hovermode="x unified"
         )
 
         return fig

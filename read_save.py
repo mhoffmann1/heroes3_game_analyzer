@@ -184,9 +184,10 @@ def extract_game_data(save, ai_values):
                     "army": army,
                     "army_strength": army_strength,
                     "spells": list(spells),
-                    "artifact_spells": list(artifact_spells)
-                
-                        
+                    "artifact_spells": list(artifact_spells),
+                    "has_dd": spell_known("Dimension Door", spells) or spell_known("Dimension Door", artifact_spells),
+                    "has_fly": spell_known("Fly", spells) or spell_known("Fly", artifact_spells),
+                    "has_tp": spell_known("Town Portal", spells) or spell_known("Town Portal", artifact_spells)                
                 }
                 heroes.append(hero_data)
             except AttributeError as e:
@@ -210,6 +211,9 @@ def extract_game_data(save, ai_values):
     
     # Return both heroes and game info
     return {"heroes": heroes, "game_info": game_info, "resources": resources}
+
+def spell_known(spell, spell_source):
+    return spell in spell_source
 
 def save_to_json(data, output_file):
     """Save hero stats and game info to a JSON file."""
