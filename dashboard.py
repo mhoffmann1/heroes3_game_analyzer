@@ -86,7 +86,8 @@ def parse_data(data):
                 "sulfur": player_data.get("resources", {}).get("sulfur", 0),
                 "crystal": player_data.get("resources", {}).get("crystals", 0),
                 "gems": player_data.get("resources", {}).get("gems", 0),
-                "town_count": player_data.get("town_count", 0)
+                "town_count": player_data.get("town_count", 0),
+                "total_strength": player_data.get("total_strength", 0)
             })
 
     df_heroes = pd.DataFrame(hero_rows)
@@ -118,7 +119,7 @@ def run_dashboard(df_heroes, df_players, game_info, port):
     player_options = sorted(df_heroes["player_color"].dropna().unique())
     hero_options = sorted(df_heroes["hero_name"].dropna().unique())
     metric_options = ["experience", "army_strength", "attack", "defense", "power", "knowledge"]
-    player_metric_options = ["gold", "wood", "ore", "mercury", "sulfur", "crystal", "gems", "town_count"]
+    player_metric_options = ["gold", "wood", "ore", "mercury", "sulfur", "crystal", "gems", "town_count", "total_strength"]
 
     PLAYER_COLORS = {
         "Red": "#FF0000",
@@ -186,7 +187,7 @@ def run_dashboard(df_heroes, df_players, game_info, port):
             dcc.Dropdown(
                 id="player_metric_selector",
                 options=[{"label": m.capitalize(), "value": m} for m in player_metric_options],
-                value=["gold", "town_count"],
+                value=["town_count", "gold"],
                 multi=True
             ),
         ], style={"width": "50%", "marginBottom": "30px"}),
@@ -306,13 +307,13 @@ def run_dashboard(df_heroes, df_players, game_info, port):
     def update_town_pie(selected_players, selected_day):
         if df_players.empty or selected_day is None:
             return go.Figure()
-    
+
         current = df_players[df_players["day"] == selected_day]
         filtered = current[current["player_color"].isin(selected_players)]
-    
+
         if filtered.empty:
             return go.Figure()
-    
+
         fig = px.pie(
             filtered,
             names="player_color",
@@ -321,7 +322,7 @@ def run_dashboard(df_heroes, df_players, game_info, port):
             color="player_color",
             color_discrete_map=PLAYER_COLORS
         )
-    
+
         return fig
 
     app.run(debug=True, port=port)

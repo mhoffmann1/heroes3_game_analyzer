@@ -1645,7 +1645,7 @@ class Savefile(object):
     def find_towns_by_header(self):
         
         self.towns = []
-        TOWN_HEADER = b'[\x70\x71]\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00'
+        TOWN_HEADER = b'[\x01-\x71]\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00'
         for match in re.finditer(TOWN_HEADER, self.raw):
             header_offset = match.start()
 
@@ -1658,48 +1658,51 @@ class Savefile(object):
 
             for possible_len in range(3, max_name_length + 1):
                 name_start = header_offset - 303 - possible_len
+                #null_sign = self.raw[name_start - 3]
                 length_byte = self.raw[name_start - 2]
                 separator = self.raw[name_start - 1]
 
                 if length_byte == possible_len and separator == 0x00:
                     name_bytes = self.raw[name_start: name_start + possible_len]
-                    try:
-                        name = name_bytes.decode('ascii')
-                        #logger.debug(f"Town: {name}")
-                        #logger.debug(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
-                    
-                    except:
-                        name = "<decode error>"
+                    if b'\x00' not in name_bytes:
+                        try:
+                            name = name_bytes.decode('ascii')
+                            logger.debug(f"Town: {name}")
+                            logger.debug(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
 
-                    coord_offset = name_start - 71 # Calculated manually
-                    #print(f"Coord bytes: {self.raw[coord_offset:coord_offset+10].hex()}")
+                        except UnicodeDecodeError:
+                            name = "<decode error>"
 
-                    x = self.raw[coord_offset+4]
-                    y = self.raw[coord_offset+5]
-                    z = self.raw[coord_offset+6]
-                    level = 'Underground' if z == 1 else 'Surface'
+                        coord_offset = name_start - 71 # Calculated manually
+                        #print(f"Coord bytes: {self.raw[coord_offset:coord_offset+10].hex()}")
 
-                    player = self.owner_colors.get(self.raw[coord_offset], "None")
-                    faction = self.faction_mapping.get(self.raw[coord_offset + 3])
+                        x = self.raw[coord_offset+4]
+                        y = self.raw[coord_offset+5]
+                        z = self.raw[coord_offset+6]
+                        level = 'Underground' if z == 1 else 'Surface'
 
-                    # Garrison section
-                    garrison_offset = coord_offset + 9
-                    garrison = self.parse_garrison(garrison_offset)
+                        player = self.owner_colors.get(self.raw[coord_offset], "None")
+                        faction = self.faction_mapping.get(self.raw[coord_offset + 3])
 
-                    town = {
-                        "name": name,
-                        "type": faction,
-                        "owner": player,
-                        "offset": name_start,
-                        "coords": [x, y, level],
-                        "garrison": garrison
-                    }
-                    self.towns.append(town)
+                        # Garrison section
+                        garrison_offset = coord_offset + 9
+                        garrison = self.parse_garrison(garrison_offset)
 
-                    if self.town_section_start is None:
-                        self.town_section_start = name_start
-                        logger.info(f"First town found at offset 0x{name_start:08X} — stored as town_section_start")
+                        town = {
+                            "name": name,
+                            "type": faction,
+                            "owner": player,
+                            "offset": name_start,
+                            "coords": [x, y, level],
+                            "garrison": garrison
+                        }
+                        self.towns.append(town)
 
+                        if self.town_section_start is None:
+                            self.town_section_start = name_start
+                            logger.info(f"First town found at offset 0x{name_start:08X} — stored as town_section_start")
+                    else:
+                        logger.debug(f"Invalid town name, bytes contain NULL: {name_bytes}")
                     break
                 #return results
 
