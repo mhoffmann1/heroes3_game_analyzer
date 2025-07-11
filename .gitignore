@@ -1,0 +1,13 @@
+h3tools/__pycache__
+h3tools/hero/__pycache__
+h3tools/lib/__pycache__
+h3tools/version/__pycache__
+saves/
+games/
+venv_heroes
+
+other
+*.bin
+*.txt
+*.log
+*.GM*
