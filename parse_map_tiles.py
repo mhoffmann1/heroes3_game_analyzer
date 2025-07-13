@@ -200,8 +200,63 @@ def find_tile_section_start(data: bytes, min_ff_block=32) -> int:
                 return i  # first non-FF byte after the block
         else:
             i += 1
+    # alternative way of finding the tile_section by looking for 350byte empty section
+    i = 0
+    while i < length:
+        if data[i] == 0x00:
+            start = i
+            while i < length and data[i] == 0x00:
+                i += 1
+            if i - start == 350:
+                return i  # first non-FF byte after the block
+            
+        else:
+            i += 1
 
     raise ValueError("Could not find a large FF block indicating start of map tile section.")
+
+def find_tile_block_start(data: bytes) -> int:
+    # Compile pattern
+    pattern = re.compile(
+        b'[\x00-\x0b].\x00\x00\x00\x00.\x00\x00\x00\xff\xff\xff\xff'
+    )
+    
+    match = pattern.search(data)
+    if match:
+        return match.start()
+    else:
+        return -1  # Not found
+
+
+def find_rumor_section(data: bytes, min_ascii_len: int = 20, min_zero_block_len: int = 32):
+    """
+    Scans binary data for a block of readable ASCII (likely the rumor string),
+    followed by a long 0x00 block. Returns offset of the string and estimated
+    offset after the 0x00 block (likely start of map tiles).
+
+    :param data: Full binary data from save file.
+    :param min_ascii_len: Minimum length of readable ASCII string to count as rumor.
+    :param min_zero_block_len: Minimum length of 0x00 block after string.
+    :return: (rumor_offset, rumor_string, map_start_candidate_offset), or None
+    """
+
+    ascii_pattern = rb'[\x20-\x7E]{' + str(min_ascii_len).encode() + rb',}'
+    for match in re.finditer(ascii_pattern, data):
+        rumor_str = match.group().decode(errors='ignore')
+        start = match.start()
+        end = match.end()
+
+        # Check for long block of 0x00 following
+        zero_count = 0
+        i = end
+        while i < len(data) and data[i] == 0x00:
+            zero_count += 1
+            i += 1
+
+        if zero_count >= min_zero_block_len:
+            return start, rumor_str, i  # rumor offset, string, first byte after 0s
+
+    return None
 
 
 def main():
@@ -217,8 +272,12 @@ def main():
     game_info = parse_game_info(mapdata)
     map_size = int(game_info['map_size'])
 
-    tile_section_start = find_tile_section_start(save.raw)
+    #tile_section_start = find_tile_section_start(save.raw)
+    tile_section_start = find_tile_block_start(save.raw)
+
     print(f"Map section starts at {tile_section_start}")
+    #print(f"Map section starts alt at {test}")
+
 
     tiles = extract_tiles(save.raw, map_size, int(game_info['levels']), tile_section_start)
 
