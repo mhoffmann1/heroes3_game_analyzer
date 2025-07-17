@@ -173,47 +173,14 @@ def extract_tiles(data: bytes, map_size, levels, start_offset):
 
 def is_dragon_utopia(tile: bytes) -> bool:
     if len(tile) >= 26:
-        if tile[7] == 0x10 and tile[8] in [0x19]\
-            and tile[24] == 0x01 and tile[25] == 0x01:
+        #if tile[7] in [0x10, 0x01] and tile[8] in [0x19]\  <- false positive?
+        
+        if tile[7] in [0x10] and tile[8] in [0x19]\
+        and tile[24] == 0x01 and tile[25] == 0x01:
             return True
         else:
             return False
         
-def find_tile_section_start(data: bytes, min_ff_block=32) -> int:
-    """
-    Finds the first large block of consecutive 0xFF bytes and returns the offset
-    of the first non-0xFF byte that follows it. Assumes that this marks the
-    start of the map tile section.
-
-    :param data: Raw binary data
-    :param min_ff_block: Minimum number of consecutive 0xFF bytes to qualify as a block
-    :return: Offset of first byte after the FF block (start of tile section)
-    """
-    i = 0
-    length = len(data)
-    while i < length:
-        if data[i] == 0xFF:
-            start = i
-            while i < length and data[i] == 0xFF:
-                i += 1
-            if i - start >= min_ff_block:
-                return i  # first non-FF byte after the block
-        else:
-            i += 1
-    # alternative way of finding the tile_section by looking for 350byte empty section
-    i = 0
-    while i < length:
-        if data[i] == 0x00:
-            start = i
-            while i < length and data[i] == 0x00:
-                i += 1
-            if i - start == 350:
-                return i  # first non-FF byte after the block
-            
-        else:
-            i += 1
-
-    raise ValueError("Could not find a large FF block indicating start of map tile section.")
 
 def find_tile_block_start(data: bytes) -> int:
     # Compile pattern
@@ -258,6 +225,23 @@ def find_rumor_section(data: bytes, min_ascii_len: int = 20, min_zero_block_len:
 
     return None
 
+def check_utopia_status(utopia_bytes):
+    conquered = True if utopia_bytes[17] == 0xfe else False
+    return conquered
+
+def get_visited_players(utopia_bytes):
+    visited_bitmap = print_bits_little_endian(utopia_bytes[14],utopia_bytes[15])
+    return visited_bitmap
+
+def print_bits_little_endian(byte1, byte2):
+    def byte_to_bits_le(byte):
+        return ''.join(str((byte >> i) & 1) for i in range(8))
+    
+    le_byte1 = byte_to_bits_le(byte1)
+    le_byte2 = byte_to_bits_le(byte2)
+    visited_bitmask = (le_byte1+le_byte2)[5:-3]
+    return visited_bitmask
+
 
 def main():
     if len(sys.argv) != 2:
@@ -267,25 +251,32 @@ def main():
     with open(sys.argv[1], 'rb') as f:
         data = f.read()
 
+    
+    # Uncomment for full functionality
     save = load_savegame(sys.argv[1])
-    mapdata = getattr(save, "mapdata", {})
-    game_info = parse_game_info(mapdata)
-    map_size = int(game_info['map_size'])
+    #mapdata = getattr(save, "mapdata", {})
+    #game_info = parse_game_info(mapdata)
+    #map_size = int(game_info['map_size'])
+    #map_levels = int(game_info['levels'])
+    
+    
+    # Temp hardcoded value
+    map_size = 36
+    map_levels = 1
 
-    #tile_section_start = find_tile_section_start(save.raw)
     tile_section_start = find_tile_block_start(save.raw)
 
     print(f"Map section starts at {tile_section_start}")
     #print(f"Map section starts alt at {test}")
 
 
-    tiles = extract_tiles(save.raw, map_size, int(game_info['levels']), tile_section_start)
+    tiles = extract_tiles(save.raw, map_size, map_levels, tile_section_start)
 
     if not tiles:
         print("❌ No valid tiles found.")
     else:
         print(f"✅ Found {len(tiles)} tiles:")
-        last_offset = None
+        #last_offset = None
         utopias = []
         for idx, (offset, tile, size) in enumerate(tiles):
             print(f"Tile {idx} @ offset {offset} ({size} bytes): {tile.hex()}")
@@ -293,32 +284,33 @@ def main():
                 utopia = {
                     'offset': idx,
                     'tile': tile,
-                    'underground': True if idx//(map_size*map_size) else False
+                    'underground': True if idx//(map_size*map_size) else False,
+                    'visited_bitmask': get_visited_players(tile),
+                    'conquered': check_utopia_status(tile)
                 }
                 utopias.append(utopia)
-            if last_offset is not None:
-                expected_offset = last_offset + last_size
-                if offset > expected_offset:
-                    print(f"Tile {idx} @ offset {offset} ({size} bytes): {tile.hex()}")
-                    print(f"⚠️  Gap of {offset - expected_offset} bytes detected between tile {idx-1} and tile {idx}!")
-                    print(f'Gap bytes: {save.raw[last_offset+last_size:offset].hex()}')
-            last_offset = offset
-            last_size = size
 
-    print(f"Map info:\n {game_info}")
+
+    #print(f"Map info:\n {game_info}")
     print(f"\n🐉 Total Dragon Utopias found: {len(utopias)}")
     for utopia in utopias:
-        print(f"Utopia offset: {utopia['offset']}, mapsize: {map_size}")
+        #print(f"Utopia offset: {utopia['offset']}, mapsize: {map_size}")
         coords = utopia['offset'] - (map_size*map_size) if utopia['underground'] else utopia['offset']
         x_coord = coords % map_size
         y_coord = coords // map_size
+        #visited = get_visited_players(utopia['tile'])
         print(
             f"Utopia at offset {utopia['offset']:06d} | "
             f"X: {x_coord:03d} | "
             f"Y: {y_coord:03d} | "
             f"Underground: {str(utopia['underground']):<5} | "
             f"Tile: {utopia['tile'].hex():<60}"
+            f"Visited by players: {utopia['visited_bitmask']} "
+            f"Conquered: {utopia['conquered']}"
         )
+
+    for utopia in utopias:
+        print(f"Extracted from tiles: {tiles[utopia['offset']][1].hex()}\n")
 
 if __name__ == "__main__":
     main()
