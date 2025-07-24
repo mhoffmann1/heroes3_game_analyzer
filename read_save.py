@@ -10,8 +10,8 @@ from tqdm import tqdm
 
 import h3tools.metadata as metadata
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(filename='h3parser.log', encoding='utf-8', level=logging.DEBUG)
+#logger = logging.getLogger(__name__)
+#logging.basicConfig(filename='h3parser.log', encoding='utf-8', level=logging.DEBUG)
 
 def load_savegame(file_path):
     """Load a Heroes 3 savegame file."""
@@ -56,6 +56,7 @@ def parse_game_info(mapdata, towns):
     # Parse mapdata['desc'] for map name and other details
     desc_data = mapdata.get("desc", "")
     if desc_data:
+        print(f"Game info: {desc_data}")
         # Extract map name
         try:
             map_name_match = re.search(r'Template was 8XM8 Huge from pack Original template pack', desc_data)
@@ -65,15 +66,17 @@ def parse_game_info(mapdata, towns):
             pass
         
         # Extract number of human and computer players
-        try:
-            human_match = re.search(r'humans (\d+)', desc_data, re.IGNORECASE)
-            if human_match:
-                game_info["human_players"] = int(human_match.group(1))
-            comp_match = re.search(r'computers (\d+)', desc_data, re.IGNORECASE)
-            if comp_match:
-                game_info["computer_players"] = int(comp_match.group(1))
-        except (AttributeError, TypeError):
-            pass
+        game_info["human_players"] = mapdata.get("humans")
+        game_info["computer_players"] = mapdata.get("computers")
+        #try:
+        #    human_match = re.search(r'humans (\d+)', desc_data, re.IGNORECASE)
+        #    if human_match:
+        #        game_info["human_players"] = int(human_match.group(1))
+        #    comp_match = re.search(r'computers (\d+)', desc_data, re.IGNORECASE)
+        #    if comp_match:
+        #        game_info["computer_players"] = int(comp_match.group(1))
+        #except (AttributeError, TypeError):
+        #    pass
         
         # Extract player town choices (e.g., 'red town choice is tower')
         try:
@@ -83,19 +86,11 @@ def parse_game_info(mapdata, towns):
             pass
         
         # Extract other details
+        game_info["map_size"] = mapdata.get("size")
+        game_info["levels"] = mapdata.get("levels")
+        game_info["water"] = mapdata.get("water")
+        game_info["monsters"] = mapdata.get("monsters")
         try:
-            size_match = re.search(r'size (\d+)', desc_data, re.IGNORECASE)
-            if size_match:
-                game_info["map_size"] = size_match.group(1)
-            levels_match = re.search(r'levels (\d+)', desc_data, re.IGNORECASE)
-            if levels_match:
-                game_info["levels"] = int(levels_match.group(1))
-            water_match = re.search(r'water (\w+)', desc_data, re.IGNORECASE)
-            if water_match:
-                game_info["water"] = water_match.group(1).lower()
-            monsters_match = re.search(r'monsters (\d+)', desc_data, re.IGNORECASE)
-            if monsters_match:
-                game_info["monsters"] = int(monsters_match.group(1))
             expansion_match = re.search(r'HotA (\d+\.\d+\.\d+)', desc_data, re.IGNORECASE)
             if expansion_match:
                 game_info["expansion"] = f"Horn of the Abyss {expansion_match.group(1)}"
@@ -281,6 +276,28 @@ def get_army_strenght(player):
 
     return round(total_strength, 2)
 
+def setup_logger(logfile):
+    logger = logging.getLogger('h3_analyzer')
+    logger.setLevel(logging.DEBUG)
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_formatter = logging.Formatter('%(message)s')
+    console_handler.setFormatter(console_formatter)
+
+    # File handler
+    file_handler = logging.FileHandler(logfile, mode='w')
+    file_handler.setLevel(logging.DEBUG)
+    file_formatter = logging.Formatter('%(asctime)s - %(message)s')
+    file_handler.setFormatter(file_formatter)
+
+    # Add handlers if not already added
+    if not logger.handlers:
+        logger.addHandler(console_handler)
+        logger.addHandler(file_handler)
+
+    return logger
 
 def main():
     parser = argparse.ArgumentParser(
@@ -298,8 +315,10 @@ def main():
     args = parser.parse_args()
 
     # Configure logging
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    logger = logging.getLogger(__name__)
+
+    logger = setup_logger('h3_analyzer.log')
+    #logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+    #logger = logging.getLogger(__name__)
 
     try:
         # Load AI unit values

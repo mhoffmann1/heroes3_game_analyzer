@@ -49,7 +49,7 @@ if is_gui_possible:
 ## Seconds to wait before exiting binary executable command-line use
 BINARY_WAIT = 60
 
-logger = logging.getLogger(__package__)
+logger = logging.getLogger('h3_analyzer')
 window = None    # Application main window instance
 
 
@@ -334,39 +334,6 @@ def run_export(filenames, format, outname=None, search=()):
         else:
             output()
             output("Wrote %s of %s bytes." % (outfile, os.path.getsize(outfile)))
-
-
-def run_gui(filenames):
-    """Main GUI program entrance."""
-    global logger, window
-
-    # Set up logging to GUI log window
-    logger.addHandler(guibase.GUILogHandler())
-    logger.setLevel(logging.DEBUG)
-
-    install_thread_excepthook()
-    sys.excepthook = except_hook
-
-    # Create application main window
-    app = MainApp(redirect=True) # stdout and stderr redirected to wx popup
-    window = gui.MainWindow()
-    app.SetTopWindow(window) # stdout/stderr popup closes with MainWindow
-
-    # Some debugging support
-    window.run_console("import datetime, math, os, re, time, sys, wx")
-    window.run_console("# All %s standard modules:" % conf.Title)
-    window.run_console("import h3tools")
-    window.run_console("from h3tools import conf, guibase, gui, hero, images, "
-                       "main, metadata, templates, version")
-    window.run_console("from h3tools.lib import controls, util, wx_accel")
-
-    window.run_console("")
-    window.run_console("self = wx.GetApp().TopWindow # Application main window")
-    for filename in filenames:
-        if os.path.isfile(filename):
-            wx.CallAfter(wx.PostEvent, window, gui.OpenSavefileEvent(-1, filename=filename))
-    app.MainLoop()
-
 
 def run():
     """Parses command-line arguments and runs application GUI or CLI."""

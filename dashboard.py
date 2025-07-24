@@ -23,7 +23,6 @@ def load_combined_data(directory):
         data = json.load(f)
     return data
 
-
 def parse_data(data):
     hero_rows = []
     player_rows = []
@@ -140,7 +139,6 @@ def run_dashboard(df_heroes, df_players, game_info, port):
     }
 
     PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
-
 
     app.layout = html.Div([
         html.H1("Heroes 3 Savegame Analyzer Dashboard"),

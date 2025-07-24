@@ -23,11 +23,13 @@ import sys
 
 import h3tools
 from . import conf
-from . lib import util
+from . lib import util, utopias
+from . lib.utopias import Utopia
 
 
-logger = logging.getLogger(__package__)
 
+#logger = logging.getLogger(__package__)
+logger = logging.getLogger('h3_analyzer')
 
 """Blank value bytes."""
 BLANK = b"\xFF"
@@ -1466,6 +1468,7 @@ class Savefile(object):
         self.town_section_start = None
         self.heroes   = []
         self.towns    = []
+        self.dragon_utopias = []
         self.player_sections = []
         self.player_resources = []
         self.read(parse_heroes)
@@ -1494,9 +1497,31 @@ class Savefile(object):
         self.towns = []
         self.detect_version()
         self.parse_metadata()
+        self.split_map_description()
         #self.parse_towns()
         self.find_towns_by_header()
         self.player_resources = self.extract_player_sections(self.raw)
+
+
+        # Dragon utopia part
+        dragon_utopias = []
+
+        tiles = utopias.extract_tiles(self.raw, int(self.mapdata['size']), int(self.mapdata['levels']), utopias.find_tile_block_start(self.raw))
+        #self.dragon_utopias = self.find_dragon_utopias()
+        if not tiles:
+            logger.debug("No valid map tiles found.")
+        else:
+            logger.debug(f"Found {len(tiles)} tiles:")
+        #last_offset = None
+        for idx, (offset, tile, size) in enumerate(tiles):
+            #logger.debug(f"Tile {idx} @ offset {offset} ({size} bytes): {tile.hex()}")
+            if Utopia.is_dragon_utopia(tile):
+                utopia = Utopia(idx,tile,self.mapdata['size'])
+                dragon_utopias.append(utopia)
+#
+       # print(f"Utopias found: {utopias}")
+        for utopia in dragon_utopias:
+            logger.debug(f"Utopia: {utopia.get_info()}")
 
         if parse_heroes: self.parse_heroes()
         self.update_info()
@@ -1542,7 +1567,7 @@ class Savefile(object):
         if self.version in h3tools.version.VERSIONS:
             self.mapdata["game"] = h3tools.version.VERSIONS[self.version].TITLE
         logger.info("Detected %s as version %r.", self.filename, self.version)
-
+    
     def extract_player_sections(self, raw_data):
         """Dynamically detect and extract 200-byte player blocks for 8 HotA players."""
         from collections import OrderedDict
@@ -1550,8 +1575,9 @@ class Savefile(object):
 
         # Preconditions
         if not hasattr(self, 'town_section_start') or self.town_section_start is None:
-            raise ValueError("town_section_start not set. Run parse_towns() first.")
-
+            logger.debug(f"There were no towns found in the game, skipping player sections.")
+            return []
+            
         # Parameters
         block_size = 200
         player_count = 8
@@ -1618,7 +1644,7 @@ class Savefile(object):
             logger.warning("Failed to parse map name and description from %s.", self.filename)
             return
         cpos = match.start(next(iter(self.HEADER_TEXTS)))  # Start of field length count
-        for n, clen in self.HEADER_TEXTS.items():  # Parse consecutive length-value fields
+        for n, clen in self.HEADER_TEXTS.items():  # Parse consecutivself.mapdatae length-value fields
             try:
                 nlen = util.bytoi(self.raw[cpos:cpos + clen])
                 nraw = self.raw[cpos + clen:cpos + clen + nlen]
@@ -1629,6 +1655,37 @@ class Savefile(object):
             except Exception:
                 logger.exception("Failed to parse map name and description from %s.", self.filename)
         if "game" in self.mapdata: self.mapdata["game"] = self.mapdata.pop("game") # Order last
+
+    
+    def split_map_description(self):
+        desc = self.mapdata.get("desc", "")
+
+        # Extract structured fields with regex
+        match = re.search(
+            r"Random seed was (\d+), size (\d+), levels (\d+), humans (\d+), computers (\d+), water (\w+), monsters (\d+)",
+            desc
+        )
+
+        if match:
+            (
+                seed, size, levels, humans,
+                computers, water, monsters
+            ) = match.groups()
+
+            # Remove matched portion from the desc
+            cleaned_desc = desc.replace(match.group(0), "").strip().strip(',')
+
+            # Update the dictionary
+            self.mapdata.update({
+                "random_seed": int(seed),
+                "size": int(size),
+                "levels": int(levels),
+                "humans": int(humans),
+                "computers": int(computers),
+                "water": water,
+                "monsters": int(monsters),
+                "desc": cleaned_desc
+            })
 
     def find_hero_section_start(self):
         """Find the start offset of the hero section using HERO_REGEX."""

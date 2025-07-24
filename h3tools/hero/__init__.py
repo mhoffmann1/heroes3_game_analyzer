@@ -28,7 +28,7 @@ from . import spells
 from . import stats
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('h3_analyzer')
 
 
 ## Modules for hero properties in order of showing
