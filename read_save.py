@@ -39,7 +39,8 @@ def parse_game_info(mapdata, towns):
         "water": "",
         "monsters": 0,
         "expansion": "",
-        "towns": []
+        "towns": [],
+        "num_of_utopias": 0
     }
     
     # Parse mapdata['name'] for player names, game date, and template
@@ -109,10 +110,6 @@ def parse_game_info(mapdata, towns):
     except (AttributeError, TypeError, KeyError) as e:
         logger.warning("Failed to parse town data: %s", e)
 
-    # Utopia placeholder here
-
-
-    
     return game_info
 
 def calculate_army_strength(army, attack_skill, defense_skill, ai_values):
@@ -231,9 +228,30 @@ def extract_game_data(save, ai_values, dragon_utopia_state):
                 utopia = Utopia(idx,tile,save.mapdata['size'])
                 dragon_utopia_state.append(utopia)
 
+        game_info['num_of_utopias'] = len(dragon_utopia_state)
+
         logger.info(f"Utopias found: {len(dragon_utopia_state)}")
         for utopia in dragon_utopia_state:
             logger.info(f"Utopia: {utopia.get_info()}")
+    else:
+        for index, utopia in enumerate(dragon_utopia_state):
+
+        # Check if Utopia become conquered, if yes check the visited status (if changed from previous state). If unganched and visited by only 1 player: assign this player
+        # Otherwise mark Utopia as conquered by unknown (the 9th player)
+        # Logic for applying Player to Utopia if he concuered it
+
+        #Continue from here!!!
+            visited_this_turn = Utopia.get_visited_players(save.maptiles[utopia.offset][1])
+            conquered = Utopia.check_utopia_status(save.maptiles[utopia.offset][1])
+            if conquered != utopia.conquered:
+                logger.info(f"Utopia at {utopia.x_coord}, {utopia.y_coord} was looted this turn.")
+                dragon_utopia_state[index].conquered = conquered
+                # Need logic to verify which player conquered Utopia
+
+            if visited_this_turn != utopia.visited_bitmask:
+                logger.info(f"New player visited Utopia at {utopia.x_coord}, {utopia.y_coord}")
+                dragon_utopia_state[index].visited_bitmask = visited_this_turn
+
 
     # Return both heroes and game info
     return {"heroes": heroes, "game_info": game_info, "resources": resources}

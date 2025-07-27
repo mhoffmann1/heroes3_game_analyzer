@@ -26,14 +26,16 @@ class Utopia():
         }
         return info
 
-    def get_visited_players(self, utopia_bytes):
+    @staticmethod
+    def get_visited_players(utopia_bytes):
         def byte_to_bits_le(byte):
             return ''.join(str((byte >> i) & 1) for i in range(8))    
         le_byte1, le_byte2 = byte_to_bits_le(utopia_bytes[14]), byte_to_bits_le(utopia_bytes[15])
         visited_bitmask = (le_byte1+le_byte2)[5:-3]
         return visited_bitmask
-                            
-    def check_utopia_status(self, utopia_bytes):
+
+    @staticmethod                        
+    def check_utopia_status(utopia_bytes):
         conquered = True if utopia_bytes[17] == 0xfe else False
         return conquered
     
@@ -69,8 +71,6 @@ def extract_tiles(data: bytes, map_size, levels, start_offset):
         processed_tiles += 1
 
     return tiles
-
-
         
 def find_tile_block_start(data: bytes) -> int:
     # Compile pattern
@@ -113,75 +113,3 @@ def find_rumor_section(data: bytes, min_ascii_len: int = 20, min_zero_block_len:
             return start, rumor_str, i  # rumor offset, string, first byte after 0s
 
     return None
-
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python extract_tiles.py <filename>")
-        return
-
-    with open(sys.argv[1], 'rb') as f:
-        data = f.read()
-
-    
-    # Uncomment for full functionality
-    save = load_savegame(sys.argv[1])
-    #mapdata = getattr(save, "mapdata", {})
-    #game_info = parse_game_info(mapdata)
-    #map_size = int(game_info['map_size'])
-    #map_levels = int(game_info['levels'])
-    
-    
-    # Temp hardcoded value
-    map_size = 36
-    map_levels = 1
-
-    tile_section_start = find_tile_block_start(save.raw)
-
-    print(f"Map section starts at {tile_section_start}")
-    #print(f"Map section starts alt at {test}")
-
-
-    tiles = extract_tiles(save.raw, map_size, map_levels, tile_section_start)
-
-    if not tiles:
-        print("❌ No valid tiles found.")
-    else:
-        print(f"✅ Found {len(tiles)} tiles:")
-        #last_offset = None
-        utopias = []
-        for idx, (offset, tile, size) in enumerate(tiles):
-            print(f"Tile {idx} @ offset {offset} ({size} bytes): {tile.hex()}")
-            if is_dragon_utopia(tile):
-                utopia = {
-                    'offset': idx,
-                    'tile': tile,
-                    'underground': True if idx//(map_size*map_size) else False,
-                    'visited_bitmask': get_visited_players(tile),
-                    'conquered': check_utopia_status(tile)
-                }
-                utopias.append(utopia)
-
-
-    #print(f"Map info:\n {game_info}")
-    print(f"\n🐉 Total Dragon Utopias found: {len(utopias)}")
-    for utopia in utopias:
-        #print(f"Utopia offset: {utopia['offset']}, mapsize: {map_size}")
-        coords = utopia['offset'] - (map_size*map_size) if utopia['underground'] else utopia['offset']
-        x_coord = coords % map_size
-        y_coord = coords // map_size
-        #visited = get_visited_players(utopia['tile'])
-        print(
-            f"Utopia at offset {utopia['offset']:06d} | "
-            f"X: {x_coord:03d} | "
-            f"Y: {y_coord:03d} | "
-            f"Underground: {str(utopia['underground']):<5} | "
-            f"Tile: {utopia['tile'].hex():<60}"
-            f"Visited by players: {utopia['visited_bitmask']} "
-            f"Conquered: {utopia['conquered']}"
-        )
-
-    for utopia in utopias:
-        print(f"Extracted from tiles: {get_visited_players(tiles[utopia['offset']][1])}, status: {check_utopia_status(tiles[utopia['offset']][1])}\n")
-
-if __name__ == "__main__":
-    main()

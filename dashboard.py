@@ -32,8 +32,11 @@ def parse_data(data):
         filename = entry.get("filename", "")
         day = parse_day_from_filename(filename)
 
+        # If game_info is not defined then we are parsing first savefile
+        # This info should be extracted only once
         if not game_info:
             game_info = entry.get("game_info", {})
+
 
         players = entry.get("players", {})
         for player_color, player_data in players.items():
