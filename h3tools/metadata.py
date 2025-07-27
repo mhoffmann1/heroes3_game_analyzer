@@ -1468,9 +1468,10 @@ class Savefile(object):
         self.town_section_start = None
         self.heroes   = []
         self.towns    = []
-        self.dragon_utopias = []
+        #self.dragon_utopias = []
         self.player_sections = []
         self.player_resources = []
+        self.maptiles    = []
         self.read(parse_heroes)
         
 
@@ -1501,27 +1502,25 @@ class Savefile(object):
         #self.parse_towns()
         self.find_towns_by_header()
         self.player_resources = self.extract_player_sections(self.raw)
-
-
+        self.maptiles = utopias.extract_tiles(self.raw, int(self.mapdata['size']), int(self.mapdata['levels']), utopias.find_tile_block_start(self.raw))
+        
         # Dragon utopia part
-        dragon_utopias = []
-
-        tiles = utopias.extract_tiles(self.raw, int(self.mapdata['size']), int(self.mapdata['levels']), utopias.find_tile_block_start(self.raw))
-        #self.dragon_utopias = self.find_dragon_utopias()
-        if not tiles:
-            logger.debug("No valid map tiles found.")
-        else:
-            logger.debug(f"Found {len(tiles)} tiles:")
-        #last_offset = None
-        for idx, (offset, tile, size) in enumerate(tiles):
-            #logger.debug(f"Tile {idx} @ offset {offset} ({size} bytes): {tile.hex()}")
-            if Utopia.is_dragon_utopia(tile):
-                utopia = Utopia(idx,tile,self.mapdata['size'])
-                dragon_utopias.append(utopia)
-#
-       # print(f"Utopias found: {utopias}")
-        for utopia in dragon_utopias:
-            logger.debug(f"Utopia: {utopia.get_info()}")
+        #self.dragon_utopias = []
+        #
+        #if not maptiles:
+        #    logger.debug("No valid map tiles found.")
+        #else:
+        #    logger.debug(f"Found {len(maptiles)} tiles:")
+        ##last_offset = None
+        #for idx, (offset, tile, size) in enumerate(maptiles):
+        #    #logger.debug(f"Tile {idx} @ offset {offset} ({size} bytes): {tile.hex()}")
+        #    if Utopia.is_dragon_utopia(tile):
+        #        utopia = Utopia(idx,tile,self.mapdata['size'])
+        #        self.dragon_utopias.append(utopia)
+##
+       ## print(f"Utopias found: {utopias}")
+        #for utopia in dragon_utopias:
+        #    logger.debug(f"Utopia: {utopia.get_info()}")
 
         if parse_heroes: self.parse_heroes()
         self.update_info()

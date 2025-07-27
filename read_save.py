@@ -9,6 +9,11 @@ import sys
 from tqdm import tqdm
 
 import h3tools.metadata as metadata
+from h3tools.lib.utopias import Utopia
+
+
+
+logger = logging.getLogger('h3_analyzer')
 
 #logger = logging.getLogger(__name__)
 #logging.basicConfig(filename='h3parser.log', encoding='utf-8', level=logging.DEBUG)
@@ -59,9 +64,9 @@ def parse_game_info(mapdata, towns):
         print(f"Game info: {desc_data}")
         # Extract map name
         try:
-            map_name_match = re.search(r'Template was 8XM8 Huge from pack Original template pack', desc_data)
+            map_name_match = re.search(r"Template was[^,]*", desc_data)
             if map_name_match:
-                game_info["map_name"] = "8XM8 Huge"
+                game_info["map_name"] = map_name_match.group(0)
         except (AttributeError, TypeError):
             pass
         
@@ -103,6 +108,10 @@ def parse_game_info(mapdata, towns):
         #logger.debug("Parsed %d towns: %s", len(towns), [t["name"] for t in towns])
     except (AttributeError, TypeError, KeyError) as e:
         logger.warning("Failed to parse town data: %s", e)
+
+    # Utopia placeholder here
+
+
     
     return game_info
 
@@ -124,9 +133,11 @@ def calculate_army_strength(army, attack_skill, defense_skill, ai_values):
     # Army strength = total AI Value * H
     return round(total_ai_value * H, 2)
 
-def extract_game_data(save, ai_values):
+def extract_game_data(save, ai_values, dragon_utopia_state):
     """Extract stats for all heroes and towns in the savegame."""
     heroes = []
+
+    #print(f"Test what I have: {save.maptiles}")
 
     try:
         for i, hero in enumerate(save.heroes):
@@ -204,6 +215,26 @@ def extract_game_data(save, ai_values):
     #logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
     game_info = parse_game_info(mapdata, towns)
     
+    # Utopia data:
+    # If dragon_utopia_state is empty - then extract info from map tiles and put into dragon_utopia_state
+    # If dragon_utopia_state is not empty, extract only the tiles from map that contain dragon utopias and update dragon_utopia_state
+    if not dragon_utopia_state:
+        logger.info(f"Extracting Dragon Utopias from map files...")
+        
+        if not save.maptiles:
+            logger.info("No valid map tiles found.")
+        else:
+            logger.debug(f"Checking {len(save.maptiles)} tiles.")
+        for idx, (offset, tile, size) in enumerate(save.maptiles):
+            #logger.debug(f"Tile {idx} @ offset {offset} ({size} bytes): {tile.hex()}")
+            if Utopia.is_dragon_utopia(tile):
+                utopia = Utopia(idx,tile,save.mapdata['size'])
+                dragon_utopia_state.append(utopia)
+
+        logger.info(f"Utopias found: {len(dragon_utopia_state)}")
+        for utopia in dragon_utopia_state:
+            logger.info(f"Utopia: {utopia.get_info()}")
+
     # Return both heroes and game info
     return {"heroes": heroes, "game_info": game_info, "resources": resources}
 
@@ -366,6 +397,7 @@ def main():
 
             all_raw_data = []
             all_player_data = []
+            dragon_utopia_state = []
 
             for filename in tqdm(files, desc="Processing saves"):
                 filepath = os.path.join(input_path, filename)
@@ -373,8 +405,9 @@ def main():
                     raw_data, player_data = process_file(
                         filepath,
                         ai_values,
+                        dragon_utopia_state,
                         os.path.join(args.output, filename + ".json"),
-                        save_individual=False
+                        save_individual=False                        
                     )
 
                     raw_data["filename"] = filename
@@ -403,9 +436,9 @@ def main():
         sys.exit(1)
 
 
-def process_file(filepath, ai_values, output_file, save_individual=True):
+def process_file(filepath, ai_values, dragon_utopia_state, output_file, save_individual=True):
     save = load_savegame(filepath)
-    raw_data = extract_game_data(save, ai_values)
+    raw_data = extract_game_data(save, ai_values, dragon_utopia_state)
     player_data = aggregate_player_data(raw_data)
 
     if save_individual:
