@@ -9,7 +9,7 @@ import sys
 from tqdm import tqdm
 
 import h3tools.metadata as metadata
-from h3tools.lib.utopias import Utopia
+from h3tools.lib.utopias import Utopia, UtopiaTracker
 
 
 
@@ -17,6 +17,7 @@ logger = logging.getLogger('h3_analyzer')
 
 #logger = logging.getLogger(__name__)
 #logging.basicConfig(filename='h3parser.log', encoding='utf-8', level=logging.DEBUG)
+
 
 def load_savegame(file_path):
     """Load a Heroes 3 savegame file."""
@@ -40,7 +41,7 @@ def parse_game_info(mapdata, towns):
         "monsters": 0,
         "expansion": "",
         "towns": [],
-        "num_of_utopias": 0
+        "total_utopias": 0
     }
     
     # Parse mapdata['name'] for player names, game date, and template
@@ -215,6 +216,9 @@ def extract_game_data(save, ai_values, dragon_utopia_state):
     # Utopia data:
     # If dragon_utopia_state is empty - then extract info from map tiles and put into dragon_utopia_state
     # If dragon_utopia_state is not empty, extract only the tiles from map that contain dragon utopias and update dragon_utopia_state
+
+    tracker = UtopiaTracker()
+
     if not dragon_utopia_state:
         logger.info(f"Extracting Dragon Utopias from map files...")
         
@@ -228,7 +232,7 @@ def extract_game_data(save, ai_values, dragon_utopia_state):
                 utopia = Utopia(idx,tile,save.mapdata['size'])
                 dragon_utopia_state.append(utopia)
 
-        game_info['num_of_utopias'] = len(dragon_utopia_state)
+        game_info['total_utopias'] = len(dragon_utopia_state)
 
         logger.info(f"Utopias found: {len(dragon_utopia_state)}")
         for utopia in dragon_utopia_state:
@@ -246,15 +250,53 @@ def extract_game_data(save, ai_values, dragon_utopia_state):
             if conquered != utopia.conquered:
                 logger.info(f"Utopia at {utopia.x_coord}, {utopia.y_coord} was looted this turn.")
                 dragon_utopia_state[index].conquered = conquered
-                # Need logic to verify which player conquered Utopia
-
-            if visited_this_turn != utopia.visited_bitmask:
-                logger.info(f"New player visited Utopia at {utopia.x_coord}, {utopia.y_coord}")
-                dragon_utopia_state[index].visited_bitmask = visited_this_turn
-
-
+                # Check who conquered utopia:
+                # 1. Was there new visitor?
+                if visited_this_turn != utopia.visited_bitmask:
+                    new_visitor =  find_single_new_bit(utopia.visited_bitmask, visited_this_turn)
+                    if new_visitor < 8:
+                        tracker.increment(new_visitor)
+                        dragon_utopia_state[index].conqueredby = new_visitor
+                        logger.info(f"Player {new_visitor} conquered Utopia at {utopia.x_coord}, {utopia.y_coord}")
+                    else:
+                        logger.info(f"Two or more players visited same Utopia in the same turn, unable to determine who conquered it")
+                    dragon_utopia_state[index].visited_bitmask = visited_this_turn
+                else:
+                # 2. If no new visitor, check if there is only one visitor
+                    old_visitor = find_single_one(utopia.visited_bitmask)
+                    if old_visitor < 8:
+                        tracker.increment(old_visitor)
+                        dragon_utopia_state[index].conqueredby = old_visitor
+                        logger.info(f"Player {old_visitor} conquered Utopia at {utopia.x_coord}, {utopia.y_coord}")
+                    else:
+                        logger.info(f"There are 2 or more players that already had access to conquered Utopia, unable to determine who conquered it")
+                 
     # Return both heroes and game info
-    return {"heroes": heroes, "game_info": game_info, "resources": resources}
+    return {"heroes": heroes, "game_info": game_info, "resources": resources}, tracker 
+
+def find_single_one(bitmask: str) -> int | None:
+    """
+    Takes an 8-character string of '0' and '1'.
+    If there's exactly one '1', returns its index (0-based).
+    Otherwise, returns 8.
+    """
+    count = bitmask.count('1')
+    if count == 1:
+        return bitmask.index('1')
+    return 8
+
+def find_single_new_bit(previous: str, current: str) -> int | None:
+    """
+    Returns the index where a single bit changed from '0' to '1'.
+    If more than one such change occurred, return None.
+
+    :param previous: Original 8-bit string (e.g., '00101000')
+    :param current: New 8-bit string (e.g., '10111000')
+    :return: Index of the new '1' or None
+    """
+    diffs = [i for i in range(8) if previous[i] == '0' and current[i] == '1']
+    return diffs[0] if len(diffs) == 1 else 8
+
 
 def spell_known(spell, spell_source):
     return spell in spell_source
@@ -265,15 +307,24 @@ def save_to_json(data, output_file):
         json.dump(data, f, indent=4, ensure_ascii=False)
     logger.info("Hero stats, game info, and town data saved to '%s'", output_file)
 
-def aggregate_player_data(json_data):
+def aggregate_player_data(json_data, utopia_tracker):
+
+# ----->>>> You are here
+    # include data from utopa_tracker to player instance so it is written as json
+
     players = {}
     colors = ['Red', 'Blue', 'Tan', 'Green', 'Orange', 'Purple', 'Teal', 'Pink', 'None']
+
+    
+    visited_utopias_summary = utopia_tracker.as_dict()
+    logger.info(f"Tracker data acquired for players: {visited_utopias_summary}")
     
     # Initialize player data structure
     for color in colors:
         players[color] = {
             'heroes': [],
             'towns': [],
+            'visited_utopias': 0,
             'resources': {}
         }
     
@@ -307,6 +358,8 @@ def aggregate_player_data(json_data):
     for player in colors:
         players[player]['town_count'] = len(players[player]['towns'])
         players[player]['total_strength'] = get_army_strenght(players[player])
+        if player != 'None':
+            players[player]['visited_utopias'] = visited_utopias_summary[player]
     
     return {
         'game_info': game_info,
@@ -369,6 +422,8 @@ def main():
     #logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
     #logger = logging.getLogger(__name__)
 
+    utopia_tracker = UtopiaTracker()
+
     try:
         # Load AI unit values
         try:
@@ -386,7 +441,7 @@ def main():
         if os.path.isfile(input_path):
             # Single file mode
             logger.info(f"Processing single savegame: {input_path}")
-            raw_data, player_data = process_file(input_path, ai_values, args.output)
+            raw_data, player_data = process_file(input_path, ai_values, dragon_utopia_state, args.output, utopia_tracker)
 
             # Save raw data
             save_to_json(raw_data, args.output)
@@ -425,7 +480,8 @@ def main():
                         ai_values,
                         dragon_utopia_state,
                         os.path.join(args.output, filename + ".json"),
-                        save_individual=False                        
+                        utopia_tracker,
+                        save_individual=False                      
                     )
 
                     raw_data["filename"] = filename
@@ -454,10 +510,11 @@ def main():
         sys.exit(1)
 
 
-def process_file(filepath, ai_values, dragon_utopia_state, output_file, save_individual=True):
+def process_file(filepath, ai_values, dragon_utopia_state, output_file, utopia_tracker, save_individual=True):
     save = load_savegame(filepath)
-    raw_data = extract_game_data(save, ai_values, dragon_utopia_state)
-    player_data = aggregate_player_data(raw_data)
+    raw_data, tracker_update = extract_game_data(save, ai_values, dragon_utopia_state)
+    utopia_tracker.merge(tracker_update)
+    player_data = aggregate_player_data(raw_data, utopia_tracker)
 
     if save_individual:
         # Save raw data

@@ -2,6 +2,33 @@ import os
 import re
 import sys
 
+from dataclasses import dataclass, field
+from typing import List, Dict
+
+@dataclass
+class UtopiaTracker:
+    player_names: List[str] = field(default_factory=lambda: ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink"])
+    counts: Dict[str, int] = field(init=False)
+
+    def __post_init__(self):
+        self.counts = {player: 0 for player in self.player_names}
+
+    def increment(self, player_index: int):
+        if 0 <= player_index < len(self.player_names):
+            self.counts[self.player_names[player_index]] += 1
+
+    def merge(self, other: "UtopiaTracker"):
+        for player in self.player_names:
+            self.counts[player] += other.counts.get(player, 0)
+
+    def as_dict(self) -> Dict[str, int]:
+        return dict(self.counts)
+
+    def as_list(self) -> List[int]:
+        return [self.counts[player] for player in self.player_names]
+
+    def __str__(self):
+        return ', '.join(f"{player}: {count}" for player, count in self.counts.items())
 
 class Utopia():
     def __init__(self, offset, tile, map_size):
