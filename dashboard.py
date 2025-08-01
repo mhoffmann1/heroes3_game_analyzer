@@ -95,6 +95,7 @@ def parse_data(data):
                 "crystal": player_data.get("resources", {}).get("crystals", 0),
                 "gems": player_data.get("resources", {}).get("gems", 0),
                 "town_count": player_data.get("town_count", 0),
+                "visited_utopias": player_data.get("visited_utopias", 0),
                 "total_strength": player_data.get("total_strength", 0)
             })
 
@@ -216,6 +217,9 @@ def run_dashboard(df_heroes, df_players, game_info, port):
 
         dcc.Graph(id="town_pie_chart"),
 
+        html.H2("Utopia Visitation"),
+        dcc.Graph(id="utopia_pie_chart"),
+
         html.H2("Spell Availability Over Time"),
 
         html.Label("Select Spell:"),
@@ -231,7 +235,21 @@ def run_dashboard(df_heroes, df_players, game_info, port):
         ),
 
         dcc.Graph(id="spell_chart"),
+
+        html.H2("Timeline Heatmap"),
+
+        html.Label("Select Heatmap Metric"),
+        dcc.Dropdown(
+            id="heatmap_metric_selector",
+            options=[{"label": m.capitalize(), "value": m} for m in player_metric_options],
+            value="town_count",
+            clearable=False
+        ),
+
+        dcc.Graph(id="heatmap_chart"),
+
     ])
+
 
     # Update hero selector based on player selection
     @app.callback(
@@ -413,6 +431,94 @@ def run_dashboard(df_heroes, df_players, game_info, port):
         )
 
         return fig
+
+    @app.callback(
+        Output("heatmap_chart", "figure"),
+        Input("player_selector", "value"),
+        Input("heatmap_metric_selector", "value")
+    )
+    def update_heatmap(selected_players, selected_metric):
+        if not selected_players or not selected_metric:
+            return go.Figure()
+
+        # Filter data
+        df_filtered = df_players[df_players["player_color"].isin(selected_players)]
+
+        # Pivot data to get a matrix: player_color x day
+        pivot = df_filtered.pivot_table(
+            index="player_color",
+            columns="day",
+            values=selected_metric,
+            fill_value=0
+        ).reindex(PLAYER_ORDER).dropna(how="all")  # Keep color order
+
+        # Create heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=pivot.values,
+            x=pivot.columns,
+            y=pivot.index,
+            colorscale="YlGnBu",
+            hoverongaps=False,
+            colorbar=dict(title=selected_metric.capitalize())
+        ))
+
+        fig.update_layout(
+            title=f"{selected_metric.capitalize()} Timeline Heatmap",
+            xaxis_title="Game Day",
+            yaxis_title="Player",
+            yaxis=dict(autorange="reversed")  # Top = Red
+        )
+
+        return fig
+
+    @app.callback(
+        Output("utopia_pie_chart", "figure"),
+        Input("player_selector", "value"),
+        Input("day_slider", "value")
+    )
+    def update_utopia_pie(selected_players, selected_day):
+        if df_players.empty or selected_day is None:
+            return go.Figure()
+    
+        # Use the data for the selected day
+        current = df_players[df_players["day"] == selected_day]
+    
+        # Exclude 'None' player and filter selected players
+        filtered = current[
+            (current["player_color"] != "None") &
+            (current["player_color"].isin(selected_players))
+        ]
+    
+        if filtered.empty:
+            return go.Figure()
+    
+        # Sum visited utopias per player
+        utopia_counts = filtered[["player_color", "visited_utopias"]].groupby("player_color").sum().reset_index()
+    
+        # Calculate percentages
+        total_utopias = game_info.get("total_utopias", 0)
+        if total_utopias == 0:
+            total_utopias = utopia_counts["visited_utopias"].sum()  # fallback to avoid divide-by-zero
+    
+        utopia_counts["percentage"] = 100 * utopia_counts["visited_utopias"] / total_utopias
+        utopia_counts["label"] = utopia_counts.apply(
+            lambda row: f"{row['player_color']} ({row['visited_utopias']}/{total_utopias}, {row['percentage']:.1f}%)",
+            axis=1
+        )
+    
+        # Build pie chart
+        fig = px.pie(
+            utopia_counts,
+            names="label",
+            values="visited_utopias",
+            title=f"Utopias Visited by Day {selected_day} (Total: {total_utopias})",
+            color="player_color",
+            color_discrete_map=PLAYER_COLORS
+        )
+    
+        return fig
+
+
 
     app.run(debug=True, port=port)
 
