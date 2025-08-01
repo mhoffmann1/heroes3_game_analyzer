@@ -128,7 +128,7 @@ def run_dashboard(df_heroes, df_players, game_info, port):
     player_options = sorted(df_heroes["player_color"].dropna().unique())
     hero_options = sorted(df_heroes["hero_name"].dropna().unique())
     metric_options = ["experience", "army_strength", "attack", "defense", "power", "knowledge"]
-    player_metric_options = ["gold", "wood", "ore", "mercury", "sulfur", "crystal", "gems", "town_count", "total_strength"]
+    player_metric_options = ["gold", "wood", "ore", "mercury", "sulfur", "crystal", "gems", "town_count", "total_strength", "visited_utopias"]
 
     PLAYER_COLORS = {
         "Red": "#FF0000",
@@ -479,33 +479,33 @@ def run_dashboard(df_heroes, df_players, game_info, port):
     def update_utopia_pie(selected_players, selected_day):
         if df_players.empty or selected_day is None:
             return go.Figure()
-    
+
         # Use the data for the selected day
         current = df_players[df_players["day"] == selected_day]
-    
+
         # Exclude 'None' player and filter selected players
         filtered = current[
             (current["player_color"] != "None") &
             (current["player_color"].isin(selected_players))
         ]
-    
+
         if filtered.empty:
             return go.Figure()
-    
+
         # Sum visited utopias per player
         utopia_counts = filtered[["player_color", "visited_utopias"]].groupby("player_color").sum().reset_index()
-    
+
         # Calculate percentages
         total_utopias = game_info.get("total_utopias", 0)
         if total_utopias == 0:
             total_utopias = utopia_counts["visited_utopias"].sum()  # fallback to avoid divide-by-zero
-    
+
         utopia_counts["percentage"] = 100 * utopia_counts["visited_utopias"] / total_utopias
         utopia_counts["label"] = utopia_counts.apply(
             lambda row: f"{row['player_color']} ({row['visited_utopias']}/{total_utopias}, {row['percentage']:.1f}%)",
             axis=1
         )
-    
+
         # Build pie chart
         fig = px.pie(
             utopia_counts,
@@ -515,7 +515,7 @@ def run_dashboard(df_heroes, df_players, game_info, port):
             color="player_color",
             color_discrete_map=PLAYER_COLORS
         )
-    
+
         return fig
 
 
