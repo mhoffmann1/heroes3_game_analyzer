@@ -437,6 +437,7 @@ def main():
             sys.exit(1)
 
         input_path = args.input
+        dragon_utopia_state = []
 
         if os.path.isfile(input_path):
             # Single file mode
@@ -470,7 +471,7 @@ def main():
 
             all_raw_data = []
             all_player_data = []
-            dragon_utopia_state = []
+            #dragon_utopia_state = []
 
             for filename in tqdm(files, desc="Processing saves"):
                 filepath = os.path.join(input_path, filename)
@@ -511,7 +512,9 @@ def main():
 
 
 def process_file(filepath, ai_values, dragon_utopia_state, output_file, utopia_tracker, save_individual=True):
+    logger.debug(f"Loading save: {filepath}")
     save = load_savegame(filepath)
+    logger.debug(f"Extracting game data...")
     raw_data, tracker_update = extract_game_data(save, ai_values, dragon_utopia_state)
     utopia_tracker.merge(tracker_update)
     player_data = aggregate_player_data(raw_data, utopia_tracker)

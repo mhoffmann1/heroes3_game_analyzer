@@ -1463,6 +1463,8 @@ class Savefile(object):
         self.version  = None
         self.dt       = None
         self.mapdata  = {}
+        self.map_visibility_section = 0
+        self.map_exploration_stats = []
         self.size     = 0
         self.usize    = 0
         self.town_section_start = None
@@ -1473,6 +1475,7 @@ class Savefile(object):
         self.player_resources = []
         self.maptiles    = []
         self.read(parse_heroes)
+        #self.get_map_exploration()
         
 
 
@@ -1497,64 +1500,77 @@ class Savefile(object):
         self.heroes = []
         self.towns = []
         self.detect_version()
+        logger.debug(f"Parsing metadata...")
         self.parse_metadata()
+        logger.debug(f"Get map info from description...")
         self.split_map_description()
+        logger.debug(f"Get exploration data...")
+        self.get_map_exploration()
         #self.parse_towns()
+        logger.debug(f"Extract town info...")
         self.find_towns_by_header()
+        logger.debug(f"Get player resources...")
         self.player_resources = self.extract_player_sections(self.raw)
+        logger.debug(f"Extract maptiles for map: {self.mapdata}")
         self.maptiles = utopias.extract_tiles(self.raw, int(self.mapdata['size']), int(self.mapdata['levels']), utopias.find_tile_block_start(self.raw))
-        
-        # Dragon utopia part
-        #self.dragon_utopias = []
-        #
-        #if not maptiles:
-        #    logger.debug("No valid map tiles found.")
-        #else:
-        #    logger.debug(f"Found {len(maptiles)} tiles:")
-        ##last_offset = None
-        #for idx, (offset, tile, size) in enumerate(maptiles):
-        #    #logger.debug(f"Tile {idx} @ offset {offset} ({size} bytes): {tile.hex()}")
-        #    if Utopia.is_dragon_utopia(tile):
-        #        utopia = Utopia(idx,tile,self.mapdata['size'])
-        #        self.dragon_utopias.append(utopia)
-##
-       ## print(f"Utopias found: {utopias}")
-        #for utopia in dragon_utopias:
-        #    logger.debug(f"Utopia: {utopia.get_info()}")
+        #self.get_map_exploration()
 
+
+        #Debug - list all maptiles values:
+        # self.list_maptiles()
+        
         if parse_heroes: self.parse_heroes()
         self.update_info()
         logger.info("Opened %s (%s, unzipped %s).", self.filename,
                     util.format_bytes(self.size), util.format_bytes(self.usize))
+        
+    def list_maptiles(self):
+        logger.debug("------ MAPTILES ------")
+        for i, maptile in enumerate(self.maptiles):
+            logger.debug(f"{i:09d} ({maptile[0]:06d}): {maptile[1].hex()}")
 
-    def write(self, filename=None):
-        """Writes out gzipped file."""
-        filename = filename or self.filename
-        try: os.makedirs(os.path.dirname(filename))
-        except Exception: pass
-        with gzip.GzipFile(filename, "wb") as f: f.write(bytes(self.raw))
-        self.raw0 = self.raw
-        self.update_info(filename)
-        for hero in self.heroes:
-            if hero.is_patched(self): hero.mark_saved()
-        logger.info("Saved %s (%s, unzipped %s).", filename,
-                    util.format_bytes(self.size), util.format_bytes(self.usize))
+    def summarize_tile_visibility_per_player(self) -> dict:
+        """
+        Returns a dictionary mapping player index (0–7) to the number of tiles they can see.
+        Assumes self.map_exploration_stats is a list of 8-character strings representing reversed bitmasks.
+        """
+        summary = {i: 0 for i in range(8)}
+    
+        for bitmask in self.map_exploration_stats:
+            for i in range(8):
+                if bitmask[i] == '1':
+                    summary[i] += 1
+    
+        return summary
 
-    def write_ranges(self, spans, filename=None):
-        """Writes out gzipped file with specified byte ranges only."""
-        filename = filename or self.filename
-        raw = self.raw0
-        for start, end in spans: raw = raw[0:start] + self.raw[start:end] + raw[end:]
-        with gzip.GzipFile(filename, "wb") as f: f.write(bytes(raw))
-        self.raw0 = raw
-        self.update_info(filename)
-        for hero in self.heroes:
-            if any(hero.span[0] >= start and hero.span[1] < end for start, end in spans):
-                if hero.is_patched(self): hero.mark_saved()
-        logger.info("Saved %s byte %s %s (%s, unzipped %s).", filename,
-                    util.plural("range", spans, numbers=False),
-                    " and ".join("..".join(map(str, x)) for x in spans),
-                    util.format_bytes(self.size), util.format_bytes(self.usize))
+    #def write(self, filename=None):
+    #    """Writes out gzipped file."""
+    #    filename = filename or self.filename
+    #    try: os.makedirs(os.path.dirname(filename))
+    #    except Exception: pass
+    #    with gzip.GzipFile(filename, "wb") as f: f.write(bytes(self.raw))
+    #    self.raw0 = self.raw
+    #    self.update_info(filename)
+    #    for hero in self.heroes:
+    #        if hero.is_patched(self): hero.mark_saved()
+    #    logger.info("Saved %s (%s, unzipped %s).", filename,
+    #                util.format_bytes(self.size), util.format_bytes(self.usize))
+#
+    #def write_ranges(self, spans, filename=None):
+    #    """Writes out gzipped file with specified byte ranges only."""
+    #    filename = filename or self.filename
+    #    raw = self.raw0
+    #    for start, end in spans: raw = raw[0:start] + self.raw[start:end] + raw[end:]
+    #    with gzip.GzipFile(filename, "wb") as f: f.write(bytes(raw))
+    #    self.raw0 = raw
+    #    self.update_info(filename)
+    #    for hero in self.heroes:
+    #        if any(hero.span[0] >= start and hero.span[1] < end for start, end in spans):
+    #            if hero.is_patched(self): hero.mark_saved()
+    #    logger.info("Saved %s byte %s %s (%s, unzipped %s).", filename,
+    #                util.plural("range", spans, numbers=False),
+    #                " and ".join("..".join(map(str, x)) for x in spans),
+    #                util.format_bytes(self.size), util.format_bytes(self.usize))
 
     def detect_version(self):
         """Auto-detects game version, raises error if savefile not recognizable."""
@@ -1592,6 +1608,11 @@ class Savefile(object):
 
         start_offset = max(0, self.town_section_start - search_window_size)
         end_offset = self.town_section_start
+
+        # Get map exloration info
+        map_exploration = self.summarize_tile_visibility_per_player()
+        logger.debug(f"Visibility bitmasks: {self.map_exploration_stats}")
+        logger.debug(f"Exploration stats: {map_exploration}")
 
         for offset in range(start_offset, end_offset + block_size):
             # Try to read the first block
@@ -1661,7 +1682,7 @@ class Savefile(object):
 
         # Extract structured fields with regex
         match = re.search(
-            r"Random seed was (\d+), size (\d+), levels (\d+), humans (\d+), computers (\d+), water (\w+), monsters (\d+)",
+            r"Random seed was (-?\d+), size (\d+), levels (\d+), humans (\d+), computers (\d+), water (\w+), monsters (\d+)",
             desc
         )
 
@@ -1724,7 +1745,7 @@ class Savefile(object):
                         try:
                             name = name_bytes.decode('ascii')
                             logger.debug(f"Town: {name}")
-                            logger.debug(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
+                            #logger.debug(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
 
                         except UnicodeDecodeError:
                             name = "<decode error>"
@@ -1822,7 +1843,23 @@ class Savefile(object):
             else:
                 pos += start + 1
             m = re.search(REGEX, self.raw[pos:pos+5000])
+        logger.debug(f"Last hero byte was at offset: {pos}")
+        # Set likely start of map exploration data
+        self.map_visibility_section = pos + 538
         self.heroes = sorted(heroes, key=lambda x: x.name.lower())
+
+    def get_map_exploration(self):
+        num_of_tiles = pow(int(self.mapdata['size']),2) * int(self.mapdata['levels'])
+        logger.debug(f"Number of tiles: {num_of_tiles}")
+        i = 0
+        logger.debug(f"Tile visibility")
+        while i < num_of_tiles:
+            index = self.map_visibility_section+i
+            visibility = self.raw[index]
+            i += 2
+            bitmask_str = f"{visibility:08b}"[::-1]
+            self.map_exploration_stats.append(bitmask_str)
+            #logger.debug(f"{index:9d}: {bitmask_str}")
 
     def find_heroes(self, *texts, **keywords):
         """Yields heroes matching given texts and specific keywords, like skill="Luck"."""
@@ -1835,15 +1872,12 @@ class Savefile(object):
         self.dt    = datetime.datetime.fromtimestamp(os.path.getmtime(filename))
         self.size  = os.path.getsize(filename)
         self.usize = len(self.raw)
-
     def is_changed(self):
         """Returns whether loaded contents have changed."""
         return self.raw != self.raw0
-
     def match_byte_ranges(self, positions, ranges):
         """
         Returns whether byte values in savefile uncompressed bytes match given ranges.
-
         @param   positions  {key: byte index in savefile uncompressed bytes}
         @param   ranges     {key in positions: (min, max)}, with negative values skipped
         """
