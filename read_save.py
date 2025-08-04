@@ -344,11 +344,12 @@ def aggregate_player_data(json_data, utopia_tracker):
         else:
             players['None']['towns'].append(town)
     
-    # Aggregate resources by color
+    # Aggregate resources and map exploration info by color
     for resource in json_data['resources']:
         color = resource['color']
         if color in players:
             players[color]['resources'] = resource['resources']
+            players[color]['tiles_explored'] = resource['tiles_explored']
     
     # Preserve game_info header and add total towns count
     game_info = {k: v for k, v in json_data['game_info'].items() if k != 'towns'}

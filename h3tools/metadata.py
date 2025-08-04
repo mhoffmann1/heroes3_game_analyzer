@@ -1504,13 +1504,13 @@ class Savefile(object):
         self.parse_metadata()
         logger.debug(f"Get map info from description...")
         self.split_map_description()
-        logger.debug(f"Get exploration data...")
-        self.get_map_exploration()
+        #logger.debug(f"Get exploration data...")
+        #self.get_map_exploration()
         #self.parse_towns()
         logger.debug(f"Extract town info...")
         self.find_towns_by_header()
-        logger.debug(f"Get player resources...")
-        self.player_resources = self.extract_player_sections(self.raw)
+        #logger.debug(f"Get player resources...")
+        #self.player_resources = self.extract_player_sections(self.raw)
         logger.debug(f"Extract maptiles for map: {self.mapdata}")
         self.maptiles = utopias.extract_tiles(self.raw, int(self.mapdata['size']), int(self.mapdata['levels']), utopias.find_tile_block_start(self.raw))
         #self.get_map_exploration()
@@ -1520,6 +1520,11 @@ class Savefile(object):
         # self.list_maptiles()
         
         if parse_heroes: self.parse_heroes()
+        logger.debug(f"Get exploration data...")
+        self.get_map_exploration()
+        logger.debug(f"Get player resources...")
+        self.player_resources = self.extract_player_sections(self.raw)
+
         self.update_info()
         logger.info("Opened %s (%s, unzipped %s).", self.filename,
                     util.format_bytes(self.size), util.format_bytes(self.usize))
@@ -1640,7 +1645,8 @@ class Savefile(object):
                         "start_offset": block_offset,
                         "hex_snippet": resource_bytes.hex(),
                         "length": len(block),
-                        "resources": resources
+                        "resources": resources,
+                        "tiles_explored": map_exploration.get(i)
                     })
                     match_score += 1
                 except struct.error:
@@ -1648,8 +1654,8 @@ class Savefile(object):
 
             if match_score == player_count:
                 #print(f"Match found at offset 0x{offset:08X}")
-                for section in candidate_blocks:
-                    resource_str = ", ".join(f"{k}={v}" for k, v in section["resources"].items())
+                #for section in candidate_blocks:
+                    #resource_str = ", ".join(f"{k}={v}" for k, v in section["resources"].items())
                     #print(f"[{section['color']}] Offset=0x{section['start_offset']:08X}, Resources: {resource_str}")
                 player_sections.extend(candidate_blocks)
                 break  # Stop after first valid set
@@ -1850,16 +1856,17 @@ class Savefile(object):
 
     def get_map_exploration(self):
         num_of_tiles = pow(int(self.mapdata['size']),2) * int(self.mapdata['levels'])
-        logger.debug(f"Number of tiles: {num_of_tiles}")
+        logger.debug(f"Number of tiles: {num_of_tiles}, levels: {int(self.mapdata['levels'])}")
         i = 0
         logger.debug(f"Tile visibility")
         while i < num_of_tiles:
-            index = self.map_visibility_section+i
+            # Move 2 bytes for each tile
+            index = self.map_visibility_section+(i*2)
             visibility = self.raw[index]
-            i += 2
+            i += 1
             bitmask_str = f"{visibility:08b}"[::-1]
             self.map_exploration_stats.append(bitmask_str)
-            #logger.debug(f"{index:9d}: {bitmask_str}")
+            logger.debug(f"{index:9d}: {bitmask_str}")
 
     def find_heroes(self, *texts, **keywords):
         """Yields heroes matching given texts and specific keywords, like skill="Luck"."""

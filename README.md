@@ -43,5 +43,5 @@ Warning: AI Value not found for unit 'Leprechaun'
 ## Ideas
 
 Percentage of map discovered
-Number of Dragon Utopia Visited
-DD, TP, Fly - mark if available to hero
+ - substract tiles that cannot be traversed
+Map discovery animation
