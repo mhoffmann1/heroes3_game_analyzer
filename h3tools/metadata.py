@@ -1866,7 +1866,7 @@ class Savefile(object):
             i += 1
             bitmask_str = f"{visibility:08b}"[::-1]
             self.map_exploration_stats.append(bitmask_str)
-            logger.debug(f"{index:9d}: {bitmask_str}")
+            #logger.debug(f"{index:9d}: {bitmask_str}")
 
     def find_heroes(self, *texts, **keywords):
         """Yields heroes matching given texts and specific keywords, like skill="Luck"."""

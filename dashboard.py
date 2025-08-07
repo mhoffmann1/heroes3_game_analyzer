@@ -83,6 +83,9 @@ def parse_data(data):
                         continue
                     hero_rows.append(hero)
 
+            # Map size:
+            #total_tiles = pow(game_info['map_size'],2)*game_info['levels']
+
             # Player-level data
             player_rows.append({
                 "day": day,
@@ -96,8 +99,10 @@ def parse_data(data):
                 "gems": player_data.get("resources", {}).get("gems", 0),
                 "town_count": player_data.get("town_count", 0),
                 "visited_utopias": player_data.get("visited_utopias", 0),
-                "total_strength": player_data.get("total_strength", 0)
+                "total_strength": player_data.get("total_strength", 0),
+                "tiles_explored": player_data.get("tiles_explored", 0)
             })
+
 
     df_heroes = pd.DataFrame(hero_rows)
     df_players = pd.DataFrame(player_rows)
@@ -128,7 +133,8 @@ def run_dashboard(df_heroes, df_players, game_info, port):
     player_options = sorted(df_heroes["player_color"].dropna().unique())
     hero_options = sorted(df_heroes["hero_name"].dropna().unique())
     metric_options = ["experience", "army_strength", "attack", "defense", "power", "knowledge"]
-    player_metric_options = ["gold", "wood", "ore", "mercury", "sulfur", "crystal", "gems", "town_count", "total_strength", "visited_utopias"]
+    player_metric_options = ["gold", "wood", "ore", "mercury", "sulfur", "crystal", "gems", 
+                             "town_count", "total_strength", "visited_utopias", "tiles_explored" ]
 
     PLAYER_COLORS = {
         "Red": "#FF0000",
@@ -218,7 +224,31 @@ def run_dashboard(df_heroes, df_players, game_info, port):
         dcc.Graph(id="town_pie_chart"),
 
         html.H2("Utopia Visitation"),
-        dcc.Graph(id="utopia_pie_chart"),
+
+        html.Label("View Mode"),
+        dcc.RadioItems(
+            id="utopia_view_mode",
+            options=[
+                {"label": "Count", "value": "count"},
+                {"label": "Percentage", "value": "percentage"}
+            ],
+            value="count",
+            labelStyle={"display": "inline-block", "margin-right": "15px"},
+            inputStyle={"margin-right": "5px"}
+        ),
+
+        html.Div([
+            html.Div([
+                dcc.Graph(id="utopia_pie_chart")
+            ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
+
+            html.Div([
+                dcc.Graph(id="utopia_total_chart")
+            ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
+        ]),
+
+
+        #dcc.Graph(id="utopia_pie_chart"),
 
         html.H2("Spell Availability Over Time"),
 
@@ -474,16 +504,14 @@ def run_dashboard(df_heroes, df_players, game_info, port):
     @app.callback(
         Output("utopia_pie_chart", "figure"),
         Input("player_selector", "value"),
-        Input("day_slider", "value")
+        Input("day_slider", "value"),
+        Input("utopia_view_mode", "value")
     )
-    def update_utopia_pie(selected_players, selected_day):
+    def update_utopia_pie(selected_players, selected_day, view_mode):
         if df_players.empty or selected_day is None:
             return go.Figure()
 
-        # Use the data for the selected day
         current = df_players[df_players["day"] == selected_day]
-
-        # Exclude 'None' player and filter selected players
         filtered = current[
             (current["player_color"] != "None") &
             (current["player_color"].isin(selected_players))
@@ -492,28 +520,72 @@ def run_dashboard(df_heroes, df_players, game_info, port):
         if filtered.empty:
             return go.Figure()
 
-        # Sum visited utopias per player
         utopia_counts = filtered[["player_color", "visited_utopias"]].groupby("player_color").sum().reset_index()
 
-        # Calculate percentages
         total_utopias = game_info.get("total_utopias", 0)
         if total_utopias == 0:
-            total_utopias = utopia_counts["visited_utopias"].sum()  # fallback to avoid divide-by-zero
+            total_utopias = utopia_counts["visited_utopias"].sum()
 
-        utopia_counts["percentage"] = 100 * utopia_counts["visited_utopias"] / total_utopias
-        utopia_counts["label"] = utopia_counts.apply(
-            lambda row: f"{row['player_color']} ({row['visited_utopias']}/{total_utopias}, {row['percentage']:.1f}%)",
-            axis=1
-        )
+        if view_mode == "percentage":
+            utopia_counts["value"] = 100 * utopia_counts["visited_utopias"] / total_utopias
+            utopia_counts["label"] = utopia_counts.apply(
+                lambda row: f"{row['player_color']} ({row['value']:.1f}%)", axis=1
+            )
+            title = f"Utopia Visitation by Percentage on Day {selected_day}"
+        else:  # view_mode == "count"
+            utopia_counts["value"] = utopia_counts["visited_utopias"]
+            utopia_counts["label"] = utopia_counts.apply(
+                lambda row: f"{row['player_color']} ({row['visited_utopias']}/{total_utopias})", axis=1
+            )
+            title = f"Utopias Visited on Day {selected_day} (Total: {total_utopias})"
 
-        # Build pie chart
         fig = px.pie(
             utopia_counts,
             names="label",
-            values="visited_utopias",
-            title=f"Utopias Visited by Day {selected_day} (Total: {total_utopias})",
+            values="value",
+            title=title,
             color="player_color",
             color_discrete_map=PLAYER_COLORS
+        )
+
+        return fig
+    
+    @app.callback(
+        Output("utopia_total_chart", "figure"),
+        Input("day_slider", "value")
+    )
+    def update_utopia_total_chart(selected_day):
+        if df_players.empty or selected_day is None:
+            return go.Figure()
+
+        # Filter to selected day and ignore 'None'
+        current = df_players[
+            (df_players["day"] == selected_day) &
+            (df_players["player_color"] != "None")
+        ]
+
+        total_utopias = game_info.get("total_utopias", 0)
+        if total_utopias == 0:
+            return go.Figure()
+
+        total_visited = current["visited_utopias"].sum()
+        unvisited = total_utopias - total_visited
+
+        data = pd.DataFrame({
+            "status": ["Visited", "Unvisited"],
+            "count": [total_visited, max(unvisited, 0)]
+        })
+
+        fig = px.pie(
+            data,
+            names="status",
+            values="count",
+            title=f"Total Utopias Visited on Day {selected_day} ({total_visited}/{total_utopias})",
+            color="status",
+            color_discrete_map={
+                "Visited": "#4CAF50",     # Green
+                "Unvisited": "#B0BEC5"    # Grey
+            }
         )
 
         return fig
