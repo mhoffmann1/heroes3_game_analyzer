@@ -1504,8 +1504,6 @@ class Savefile(object):
         self.parse_metadata()
         logger.debug(f"Get map info from description...")
         self.split_map_description()
-        #logger.debug(f"Get exploration data...")
-        #self.get_map_exploration()
         #self.parse_towns()
         logger.debug(f"Extract town info...")
         self.find_towns_by_header()
@@ -1513,7 +1511,6 @@ class Savefile(object):
         #self.player_resources = self.extract_player_sections(self.raw)
         logger.debug(f"Extract maptiles for map: {self.mapdata}")
         self.maptiles = utopias.extract_tiles(self.raw, int(self.mapdata['size']), int(self.mapdata['levels']), utopias.find_tile_block_start(self.raw))
-        #self.get_map_exploration()
 
 
         #Debug - list all maptiles values:
@@ -1547,6 +1544,20 @@ class Savefile(object):
                     summary[i] += 1
     
         return summary
+    
+    def get_dynamic_map_view(self, player):
+        """
+        Return complete fog of war for a given player in the given turn 
+        """
+        fogofwar = ""
+
+        #----------- map_exploration_stats are empty
+        #logger.debug(f"dynamic_map_check: {self.map_exploration_stats}")
+        fogofwar = "".join(str(bitmask[player]) for bitmask in self.map_exploration_stats)
+        #for bitmask in self.map_exploration_stats:
+        #    fogofwar.join(str(bitmask[player]))
+        #logger.debug(f"bitmask fogofwarjoned:{fogofwar}")
+        return fogofwar
 
     #def write(self, filename=None):
     #    """Writes out gzipped file."""
@@ -1640,13 +1651,15 @@ class Savefile(object):
                     if not valid:
                         break
                     resources = OrderedDict((name, val) for name, val in zip(resource_names, values))
+
                     candidate_blocks.append({
                         "color": player_colors[i],
                         "start_offset": block_offset,
                         "hex_snippet": resource_bytes.hex(),
                         "length": len(block),
                         "resources": resources,
-                        "tiles_explored": map_exploration.get(i)
+                        "tiles_explored": map_exploration.get(i),
+                        "fog_of_war": self.get_dynamic_map_view(i)
                     })
                     match_score += 1
                 except struct.error:

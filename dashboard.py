@@ -4,10 +4,11 @@ import logging
 import os
 
 import dash
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import dash_table, dcc, html
+from dash import dash_table, dcc, html, State
 from dash.dependencies import Input, Output
 
 logger = logging.getLogger(__package__)
@@ -100,7 +101,8 @@ def parse_data(data):
                 "town_count": player_data.get("town_count", 0),
                 "visited_utopias": player_data.get("visited_utopias", 0),
                 "total_strength": player_data.get("total_strength", 0),
-                "tiles_explored": player_data.get("tiles_explored", 0)
+                "tiles_explored": player_data.get("tiles_explored", 0),
+                "fog_of_war": player_data.get("fog_of_war",'')
             })
 
 
@@ -277,6 +279,37 @@ def run_dashboard(df_heroes, df_players, game_info, port):
         ),
 
         dcc.Graph(id="heatmap_chart"),
+
+        html.H2("Fog of War Exploration"),
+
+        html.Label("Select Player"),
+        dcc.Dropdown(
+            id="fog_player_selector",
+            options=[
+                {"label": p, "value": p}
+                for p in PLAYER_ORDER if p in df_players["player_color"].unique()
+            ],
+            value="Red",
+            clearable=False
+        ),
+
+        # Animation controls
+        html.Div([
+            html.Button("Play", id="fog_play_btn", n_clicks=0),
+            html.Button("Pause", id="fog_pause_btn", n_clicks=0),
+            dcc.Interval(id="fog_anim_interval", interval=800, n_intervals=0, disabled=True)
+        ], style={"margin": "10px 0"}),
+
+        dcc.Graph(id="fog_of_war_map"),
+
+        dcc.Slider(
+            id="fog_day_slider",
+            min=df_players["day"].min(),
+            max=df_players["day"].max(),
+            step=1,
+            value=df_players["day"].min(),
+            marks={int(day): str(day) for day in df_players["day"].unique()},
+        ),
 
     ])
 
@@ -590,7 +623,97 @@ def run_dashboard(df_heroes, df_players, game_info, port):
 
         return fig
 
+    @app.callback(
+        Output("fog_anim_interval", "disabled"),
+        Input("fog_play_btn", "n_clicks"),
+        Input("fog_pause_btn", "n_clicks"),
+        prevent_initial_call=True
+    )
+    def toggle_animation(play_clicks, pause_clicks):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            raise dash.exceptions.PreventUpdate
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        return button_id != "fog_play_btn"  # Play = False (enabled), Pause = True (disabled)
 
+
+    @app.callback(
+        Output("fog_day_slider", "value"),
+        Input("fog_anim_interval", "n_intervals"),
+        State("fog_day_slider", "value"),
+        State("fog_day_slider", "min"),
+        State("fog_day_slider", "max"),
+        prevent_initial_call=True
+    )
+    def animate_days(n_intervals, current_day, min_day, max_day):
+        next_day = current_day + 1
+        if next_day > max_day:
+            return min_day
+        return next_day
+
+
+    @app.callback(
+        Output("fog_of_war_map", "figure"),
+        Input("fog_player_selector", "value"),
+        Input("fog_day_slider", "value")
+    )
+    def update_fog_map(player_color, selected_day):
+        if not player_color or selected_day is None:
+            return go.Figure()
+
+        row = df_players[
+            (df_players["player_color"] == player_color) &
+            (df_players["day"] == selected_day)
+        ].squeeze()
+
+        fog = row.get("fog_of_war")
+        if not fog:
+            return go.Figure()
+
+        map_size = game_info.get("map_size", 36)
+        levels = game_info.get("levels", 1)
+
+        tiles_per_level = map_size * map_size
+        level_maps = []
+        for level in range(levels):
+            offset = level * tiles_per_level
+            level_fog = fog[offset:offset + tiles_per_level]
+            grid = np.array([int(c) for c in level_fog]).reshape((map_size, map_size))
+            level_maps.append(grid)
+
+        player_rgb = PLAYER_COLORS.get(player_color, "#999999")
+        player_rgb_array = tuple(int(player_rgb.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
+
+        data = []
+        x_offset = 0
+        for i, level_grid in enumerate(level_maps):
+            rgb_image = np.zeros((map_size, map_size, 3), dtype=np.uint8)
+            for y in range(map_size):
+                for x in range(map_size):
+                    if level_grid[y, x] == 1:
+                        rgb_image[y, x] = player_rgb_array
+                    else:
+                        rgb_image[y, x] = (200, 200, 200)
+
+            # Scale bitmap 3×
+            rgb_image_large = np.repeat(np.repeat(rgb_image, 3, axis=0), 3, axis=1)
+
+            # Add title (Ground / Underground)
+            title = "Ground" if i == 0 else "Underground"
+            data.append(go.Image(z=rgb_image_large, x0=x_offset, y0=0, name=title))
+
+            # Shift for side-by-side display
+            x_offset += rgb_image_large.shape[1] + 10
+
+        fig = go.Figure(data=data)
+        fig.update_layout(
+            title=f"Fog of War - {player_color} - Day {selected_day}",
+            yaxis=dict(scaleanchor="x", autorange="reversed", visible=False),
+            xaxis=dict(visible=False),
+            showlegend=True
+        )
+
+        return fig
 
     app.run(debug=True, port=port)
 

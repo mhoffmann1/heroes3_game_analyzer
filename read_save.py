@@ -235,8 +235,11 @@ def extract_game_data(save, ai_values, dragon_utopia_state):
         game_info['total_utopias'] = len(dragon_utopia_state)
 
         logger.info(f"Utopias found: {len(dragon_utopia_state)}")
+
+        # Run this to see Dragon Utopia details on map
+        # Should go to logs
         for utopia in dragon_utopia_state:
-            logger.info(f"Utopia: {utopia.get_info()}")
+            logger.debug(f"Utopia: {utopia.get_info()}")
     else:
         for index, utopia in enumerate(dragon_utopia_state):
 
@@ -350,6 +353,7 @@ def aggregate_player_data(json_data, utopia_tracker):
         if color in players:
             players[color]['resources'] = resource['resources']
             players[color]['tiles_explored'] = resource['tiles_explored']
+            players[color]['fog_of_war'] = resource['fog_of_war']
     
     # Preserve game_info header and add total towns count
     game_info = {k: v for k, v in json_data['game_info'].items() if k != 'towns'}
