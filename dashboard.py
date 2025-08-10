@@ -8,8 +8,9 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import dash_table, dcc, html, State
+from dash import State, dash_table, dcc, html
 from dash.dependencies import Input, Output
+from plotly.subplots import make_subplots
 
 logger = logging.getLogger(__package__)
 
@@ -660,19 +661,19 @@ def run_dashboard(df_heroes, df_players, game_info, port):
     def update_fog_map(player_color, selected_day):
         if not player_color or selected_day is None:
             return go.Figure()
-
+    
         row = df_players[
             (df_players["player_color"] == player_color) &
             (df_players["day"] == selected_day)
         ].squeeze()
-
+    
         fog = row.get("fog_of_war")
         if not fog:
             return go.Figure()
-
+    
         map_size = game_info.get("map_size", 36)
         levels = game_info.get("levels", 1)
-
+    
         tiles_per_level = map_size * map_size
         level_maps = []
         for level in range(levels):
@@ -680,12 +681,15 @@ def run_dashboard(df_heroes, df_players, game_info, port):
             level_fog = fog[offset:offset + tiles_per_level]
             grid = np.array([int(c) for c in level_fog]).reshape((map_size, map_size))
             level_maps.append(grid)
-
+    
         player_rgb = PLAYER_COLORS.get(player_color, "#999999")
         player_rgb_array = tuple(int(player_rgb.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
-
+    
         data = []
+        annotations = []
         x_offset = 0
+        scale_factor = 4  # Bigger images
+    
         for i, level_grid in enumerate(level_maps):
             rgb_image = np.zeros((map_size, map_size, 3), dtype=np.uint8)
             for y in range(map_size):
@@ -694,25 +698,37 @@ def run_dashboard(df_heroes, df_players, game_info, port):
                         rgb_image[y, x] = player_rgb_array
                     else:
                         rgb_image[y, x] = (200, 200, 200)
-
-            # Scale bitmap 3×
-            rgb_image_large = np.repeat(np.repeat(rgb_image, 3, axis=0), 3, axis=1)
-
-            # Add title (Ground / Underground)
+    
+            # Scale bitmap
+            rgb_image_large = np.repeat(np.repeat(rgb_image, scale_factor, axis=0), scale_factor, axis=1)
+    
+            # Add image
+            data.append(go.Image(z=rgb_image_large, x0=x_offset, y0=0))
+    
+            # Add label above image
             title = "Ground" if i == 0 else "Underground"
-            data.append(go.Image(z=rgb_image_large, x0=x_offset, y0=0, name=title))
-
+            annotations.append(dict(
+                x=x_offset + rgb_image_large.shape[1] / 2,
+                y=-15,  # Slightly above the image
+                text=title,
+                showarrow=False,
+                font=dict(size=16, color="black"),
+                xanchor="center",
+                yanchor="bottom"
+            ))
+    
             # Shift for side-by-side display
-            x_offset += rgb_image_large.shape[1] + 10
-
+            x_offset += rgb_image_large.shape[1] + 20  # Spacing between levels
+    
         fig = go.Figure(data=data)
         fig.update_layout(
             title=f"Fog of War - {player_color} - Day {selected_day}",
             yaxis=dict(scaleanchor="x", autorange="reversed", visible=False),
             xaxis=dict(visible=False),
-            showlegend=True
+            annotations=annotations,
+            margin=dict(t=50, l=0, r=0, b=0),
         )
-
+    
         return fig
 
     app.run(debug=True, port=port)
