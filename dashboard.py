@@ -155,15 +155,29 @@ def run_dashboard(df_heroes, df_players, game_info, port):
 
     app.layout = html.Div([
         html.H1("Heroes 3 Savegame Analyzer Dashboard"),
+
+        # Toggle for Game Info
         html.Div([
-            html.H3("Game Info"),
-            dash_table.DataTable(
-                columns=[{"name": "Key", "id": "Key"}, {"name": "Value", "id": "Value"}],
-                data=[{"Key": k, "Value": str(v)} for k, v in game_info.items()],
-                style_table={'width': '50%'},
-                style_cell={'textAlign': 'left'},
+            dcc.Checklist(
+                id="toggle_game_info",
+                options=[{"label": "Show Game Info", "value": "show"}],
+                value=[],  # Empty by default = hidden
+                style={"marginBottom": "10px"}
+            ),
+            html.Div(
+                id="game_info_container",
+                children=[
+                    html.H3("Game Info"),
+                    dash_table.DataTable(
+                        columns=[{"name": "Key", "id": "Key"}, {"name": "Value", "id": "Value"}],
+                        data=[{"Key": k, "Value": str(v)} for k, v in game_info.items()],
+                        style_table={'width': '50%'},
+                        style_cell={'textAlign': 'left'},
+                    )
+                ],
+                style={"marginBottom": "30px", "display": "none"}  # Hidden by default
             )
-        ], style={"marginBottom": "30px"}),
+        ]),
 
         html.Div([
             html.H2("Hero Metrics Over Time"),
@@ -250,9 +264,6 @@ def run_dashboard(df_heroes, df_players, game_info, port):
             ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
         ]),
 
-
-        #dcc.Graph(id="utopia_pie_chart"),
-
         html.H2("Spell Availability Over Time"),
 
         html.Label("Select Spell:"),
@@ -294,7 +305,6 @@ def run_dashboard(df_heroes, df_players, game_info, port):
             clearable=False
         ),
 
-        # Animation controls
         html.Div([
             html.Button("Play", id="fog_play_btn", n_clicks=0),
             html.Button("Pause", id="fog_pause_btn", n_clicks=0),
@@ -311,9 +321,16 @@ def run_dashboard(df_heroes, df_players, game_info, port):
             value=df_players["day"].min(),
             marks={int(day): str(day) for day in df_players["day"].unique()},
         ),
-
     ])
 
+    @app.callback(
+        Output("game_info_container", "style"),
+        Input("toggle_game_info", "value")
+    )
+    def toggle_game_info(value):
+        if "show" in value:
+            return {"marginBottom": "30px", "display": "block"}
+        return {"marginBottom": "30px", "display": "none"}
 
     # Update hero selector based on player selection
     @app.callback(
