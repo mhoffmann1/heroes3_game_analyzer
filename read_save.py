@@ -48,15 +48,17 @@ def parse_game_info(mapdata, towns):
     name_data = mapdata.get("name", "")
     if name_data:
         try:
-            # Split on \x01 and \x02, filter out \x12
+            # Split on control chars, keep meaningful text
             parts = re.split(r'\x01|\x02', name_data)
             parts = [p.strip() for p in parts if p.strip() and p != '\x12']
-            if len(parts) >= 4:
-                game_info["player_names"] = [parts[0], parts[1]]  # e.g., ["Plejstocen", "addy1986"]
-                game_info["game_date"] = parts[2].replace(";", ":")  # e.g., "2025.01.24 22:40"
-                game_info["template"] = parts[3]  # e.g., "default"
+    
+            if len(parts) >= 3:
+                # Last two fields are always date and template
+                game_info["template"] = parts[-1]
+                game_info["game_date"] = parts[-2].replace(";", ":")
+                game_info["player_names"] = parts[:-2]  # Everything before is player names
             elif parts:
-                game_info["player_names"] = parts[:2] if len(parts) >= 2 else parts
+                game_info["player_names"] = parts
         except (AttributeError, TypeError):
             pass
     

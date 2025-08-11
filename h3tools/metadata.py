@@ -1742,6 +1742,15 @@ class Savefile(object):
         
         self.towns = []
         TOWN_HEADER = b'[\x01-\x71]\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00'
+        
+        TOWN_HEADER = (
+            b'[\x01-\x71](?:'
+            b'\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00'
+            b'|'
+            b'\x4a\x00\x00\x00[\x00\x07]\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+            b')'
+            )
+        
         for match in re.finditer(TOWN_HEADER, self.raw):
             header_offset = match.start()
 
@@ -1764,7 +1773,7 @@ class Savefile(object):
                         try:
                             name = name_bytes.decode('ascii')
                             logger.debug(f"Town: {name}")
-                            #logger.debug(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
+                            logger.debug(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
 
                         except UnicodeDecodeError:
                             name = "<decode error>"
