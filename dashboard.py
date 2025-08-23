@@ -28,11 +28,15 @@ def load_combined_data(directory):
 def parse_data(data):
     hero_rows = []
     player_rows = []
+    turn_time = []
     game_info = None
 
     for entry in data:
         filename = entry.get("filename", "")
         day = parse_day_from_filename(filename)
+        turn_time.append(entry.get("savetime"))
+
+
 
         # If game_info is not defined then we are parsing first savefile
         # This info should be extracted only once
@@ -109,8 +113,10 @@ def parse_data(data):
 
     df_heroes = pd.DataFrame(hero_rows)
     df_players = pd.DataFrame(player_rows)
+    df_turntime = pd.DataFrame(turn_time, columns=["turn_time"])
+    df_turntime["turn_time_sec"] = df_turntime["turn_time"].astype(int)
 
-    return df_heroes, df_players, game_info
+    return df_heroes, df_players, game_info, df_turntime
 
 
 def parse_day_from_filename(filename):
@@ -129,7 +135,7 @@ def parse_day_from_filename(filename):
     return None
 
 
-def run_dashboard(df_heroes, df_players, game_info, port):
+def run_dashboard(df_heroes, df_players, df_turn_time, game_info, port):
     app = dash.Dash(__name__)
     server = app.server
 
@@ -152,6 +158,9 @@ def run_dashboard(df_heroes, df_players, game_info, port):
     }
 
     PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
+
+    # Add turn index so we know which turn each value belongs to
+    df_turn_time["turn"] = range(1, len(df_turn_time) + 1)
 
     app.layout = html.Div([
         html.H1("Heroes 3 Savegame Analyzer Dashboard"),
@@ -180,6 +189,19 @@ def run_dashboard(df_heroes, df_players, game_info, port):
         ]),
 
         html.Div([
+            html.H2("Turn Duration Per Turn"),
+            dcc.Graph(id="turn_time_chart", style={'width': '100%'}),
+            #dcc.Graph(
+            #    id="turn_time_chart",
+            #    figure=px.bar(
+            #        df_turn_time,
+            #        x="turn",
+            #        y="turn_time_sec",
+            #        labels={"turn": "Turn", "turn_time_sec": "Turn Time (s)"},
+            #        title="Turn Duration per Turn"
+            #    )
+            #),
+
             html.H2("Hero Metrics Over Time"),
 
             html.Label("Select Players"),
@@ -322,6 +344,41 @@ def run_dashboard(df_heroes, df_players, game_info, port):
             marks={int(day): str(day) for day in df_players["day"].unique()},
         ),
     ])
+
+
+    # Chart specs start here:
+
+    # Column chart
+    @app.callback(
+        Output("turn_time_chart", "figure"),
+        Input("turn_time_chart", "id")
+    )
+    def update_turn_time(_):
+        avg_turn_time = df_turn_time["turn_time_sec"].mean()
+    
+        fig = px.bar(
+            df_turn_time,
+            x=df_turn_time.index + 1,
+            y="turn_time_sec",
+            labels={"x": "Turn", "turn_time_sec": "Seconds"},
+            title="Turn Duration (Seconds)"
+        )
+        fig.update_layout(
+            xaxis_title="Turn",
+            yaxis_title="Seconds",
+            bargap=0.2,
+            width=1200,
+            height=500
+        )
+    
+        # Add annotation with average
+        fig.add_annotation(
+            x=0.5, y=1.1, xref="paper", yref="paper", showarrow=False,
+            text=f"Average turn time: {avg_turn_time:.1f} sec",
+            font=dict(size=14, color="darkblue")
+        )
+    
+        return fig
 
     @app.callback(
         Output("game_info_container", "style"),
@@ -766,9 +823,9 @@ def main():
     args = parser.parse_args()
 
     data = load_combined_data(args.input_dir)
-    df_heroes, df_players, game_info = parse_data(data)
+    df_heroes, df_players, game_info, df_turn_time = parse_data(data)
 
-    run_dashboard(df_heroes, df_players, game_info, args.port)
+    run_dashboard(df_heroes, df_players, df_turn_time, game_info, args.port)
 
 
 if __name__ == "__main__":

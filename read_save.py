@@ -1,17 +1,19 @@
 import argparse
+import datetime
 import json
-import os
-import h3tools
-import re
-import math
 import logging
+import math
+import os
+import re
 import sys
+from datetime import datetime
+from pathlib import Path
+
 from tqdm import tqdm
 
+import h3tools
 import h3tools.metadata as metadata
 from h3tools.lib.utopias import Utopia, UtopiaTracker
-
-
 
 logger = logging.getLogger('h3_analyzer')
 
@@ -409,6 +411,11 @@ def setup_logger(logfile):
     return logger
 
 def main():
+
+    # Build default filename prefix with current date
+    date_prefix = datetime.now().strftime("%d-%m-%Y")
+    default_output = f"{date_prefix}_game_stat"
+
     parser = argparse.ArgumentParser(
         description="Extract hero stats, game info, and town data from Heroes 3 savegame(s) to JSON."
     )
@@ -418,8 +425,8 @@ def main():
     )
     parser.add_argument(
         "--output", "-o",
-        default="output_data.json",
-        help="Output file prefix or directory (default: output_data)"
+        default=default_output,
+        help=f"Output file prefix or directory (default: {default_output})"
     )
     args = parser.parse_args()
 
@@ -480,6 +487,10 @@ def main():
             all_player_data = []
             #dragon_utopia_state = []
 
+            # Get creation time of GAME_BEGIN.GMX file
+            last_save_ctime = os.path.getctime(list(Path(input_path).glob("GAME_BEGIN.GM*"))[0])
+            previous_known_turn_time = 60
+
             for filename in tqdm(files, desc="Processing saves"):
                 filepath = os.path.join(input_path, filename)
                 try:
@@ -492,8 +503,18 @@ def main():
                         save_individual=False                      
                     )
 
+                    # Get file creation timestamp 
+                    ctime = os.path.getctime(filepath)
+                    #created = datetime.datetime.fromtimestamp(ctime)
+
                     raw_data["filename"] = filename
                     player_data["filename"] = filename
+                    turn_time = ctime - last_save_ctime
+                    if turn_time > 7200 or turn_time < 0:
+                        turn_time = previous_known_turn_time
+                    player_data["savetime"] = turn_time
+                    last_save_ctime = ctime
+                    previous_known_turn_time = turn_time
 
                     all_raw_data.append(raw_data)
                     all_player_data.append(player_data)
