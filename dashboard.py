@@ -355,7 +355,7 @@ def run_dashboard(df_heroes, df_players, df_turn_time, game_info, port):
     )
     def update_turn_time(_):
         avg_turn_time = df_turn_time["turn_time_sec"].mean()
-    
+
         fig = px.bar(
             df_turn_time,
             x=df_turn_time.index + 1,
@@ -370,14 +370,14 @@ def run_dashboard(df_heroes, df_players, df_turn_time, game_info, port):
             width=1200,
             height=500
         )
-    
+
         # Add annotation with average
         fig.add_annotation(
             x=0.5, y=1.1, xref="paper", yref="paper", showarrow=False,
             text=f"Average turn time: {avg_turn_time:.1f} sec",
             font=dict(size=14, color="darkblue")
         )
-    
+
         return fig
 
     @app.callback(
@@ -801,6 +801,8 @@ def run_dashboard(df_heroes, df_players, df_turn_time, game_info, port):
             xaxis=dict(visible=False),
             annotations=annotations,
             margin=dict(t=50, l=0, r=0, b=0),
+            width=1000,   # make chart wider
+            height=800    # make chart taller
         )
     
         return fig
