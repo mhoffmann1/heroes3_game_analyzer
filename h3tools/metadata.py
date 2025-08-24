@@ -1741,13 +1741,14 @@ class Savefile(object):
     def find_towns_by_header(self):
         
         self.towns = []
-        TOWN_HEADER = b'[\x01-\x71]\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00'
+        #TOWN_HEADER = b'[\x01-\x71]\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00'
         
+        # Find towns based on summon portal structure - not great way, but works.
         TOWN_HEADER = (
             b'[\x01-\x71](?:'
-            b'\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00'
+            b'\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
             b'|'
-            b'\x4a\x00\x00\x00[\x00\x07]\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+            b'[\x00-\xb9]\x00\x00\x00[\x00-\xff]\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
             b')'
             )
         
@@ -1772,11 +1773,15 @@ class Savefile(object):
                     if b'\x00' not in name_bytes:
                         try:
                             name = name_bytes.decode('ascii')
-                            logger.debug(f"Town: {name}")
-                            logger.debug(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
+                            logger.info(f"Found town: {name}")
+                            #logger.info(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
 
                         except UnicodeDecodeError:
                             name = "<decode error>"
+
+                        if not re.fullmatch(r"[A-Za-z ']*", name):
+                            logger.info(f"Town: {name} does not contain valid characters - not a town, skipping.")
+                            continue
 
                         coord_offset = name_start - 71 # Calculated manually
                         #print(f"Coord bytes: {self.raw[coord_offset:coord_offset+10].hex()}")
