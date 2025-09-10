@@ -139,8 +139,6 @@ def extract_game_data(save, ai_values, dragon_utopia_state):
     """Extract stats for all heroes and towns in the savegame."""
     heroes = []
 
-    #print(f"Test what I have: {save.maptiles}")
-
     try:
         for i, hero in enumerate(save.heroes):
             try:
@@ -316,9 +314,6 @@ def save_to_json(data, output_file):
 
 def aggregate_player_data(json_data, utopia_tracker):
 
-# ----->>>> You are here
-    # include data from utopa_tracker to player instance so it is written as json
-
     players = {}
     colors = ['Red', 'Blue', 'Tan', 'Green', 'Orange', 'Purple', 'Teal', 'Pink', 'None']
 
@@ -366,26 +361,39 @@ def aggregate_player_data(json_data, utopia_tracker):
     # Count number of controlled towns per player
     for player in colors:
         players[player]['town_count'] = len(players[player]['towns'])
-        players[player]['total_strength'] = get_army_strenght(players[player])
+        players[player]['total_strength'] = get_total_army_strength(players[player])
+        players[player]['heroes_strength'] = get_army_heroes_strength(players[player])
+        players[player]['garrison_strength'] = get_army_garrison_strength(players[player])
+
         if player != 'None':
             players[player]['visited_utopias'] = visited_utopias_summary[player]
     
     return {
         'game_info': game_info,
-        'players': players
-        
+        'players': players        
     }
 
-def get_army_strenght(player):
-    total_strength = 0.0
+def get_total_army_strength(player):
+    total_army_strength = 0.0
 
+    total_army_strength += get_army_heroes_strength(player)    
+    total_army_strength += get_army_garrison_strength(player)
+
+    return round(total_army_strength, 2)
+
+def get_army_heroes_strength(player):
+    heroes_army_strength = 0.0
     for hero in player['heroes']:
-        total_strength += hero['army_strength']
-        
-    for town in player['towns']:
-        total_strength += town['army_strength']
+        heroes_army_strength += hero['army_strength']
+    
+    return round(heroes_army_strength, 2)
 
-    return round(total_strength, 2)
+def get_army_garrison_strength(player):
+    garrison_army_strength = 0.0
+    for town in player['towns']:
+        garrison_army_strength += town['army_strength']
+
+    return round(garrison_army_strength, 2)
 
 def setup_logger(logfile):
     logger = logging.getLogger('h3_analyzer')

@@ -1741,7 +1741,6 @@ class Savefile(object):
     def find_towns_by_header(self):
         
         self.towns = []
-        #TOWN_HEADER = b'[\x01-\x71]\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00'
         
         # Find towns based on summon portal structure - not great way, but works.
         TOWN_HEADER = (
@@ -1773,14 +1772,15 @@ class Savefile(object):
                     if b'\x00' not in name_bytes:
                         try:
                             name = name_bytes.decode('ascii')
-                            logger.info(f"Found town: {name}")
+                            #logger.info(f"Found town: {name}")
                             #logger.info(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
 
                         except UnicodeDecodeError:
                             name = "<decode error>"
 
+                        # Filter out any false positives by checking if name consists ASCII characters
                         if not re.fullmatch(r"[A-Za-z ']*", name):
-                            logger.info(f"Town: {name} does not contain valid characters - not a town, skipping.")
+                            #logger.info(f"Town: {name} does not contain valid characters - not a town, skipping.")
                             continue
 
                         coord_offset = name_start - 71 # Calculated manually

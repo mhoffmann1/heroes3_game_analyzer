@@ -105,7 +105,9 @@ def parse_data(data):
                 "gems": player_data.get("resources", {}).get("gems", 0),
                 "town_count": player_data.get("town_count", 0),
                 "visited_utopias": player_data.get("visited_utopias", 0),
-                "total_strength": player_data.get("total_strength", 0),
+                "total_hero_army_strength": player_data.get("heroes_strength", 0),
+                "total_garrison_army_strength": player_data.get("garrison_strength", 0),
+                "total_army_strength": player_data.get("total_strength", 0),
                 "tiles_explored": player_data.get("tiles_explored", 0),
                 "fog_of_war": player_data.get("fog_of_war",'')
             })
@@ -142,8 +144,9 @@ def run_dashboard(df_heroes, df_players, df_turn_time, game_info, port):
     player_options = sorted(df_heroes["player_color"].dropna().unique())
     hero_options = sorted(df_heroes["hero_name"].dropna().unique())
     metric_options = ["experience", "army_strength", "attack", "defense", "power", "knowledge"]
-    player_metric_options = ["gold", "wood", "ore", "mercury", "sulfur", "crystal", "gems", 
-                             "town_count", "total_strength", "visited_utopias", "tiles_explored" ]
+    player_metric_options = ["gold", "town_count", "total_army_strength", "total_hero_army_strength", 
+                             "total_garrison_army_strength", "visited_utopias", "tiles_explored",
+                             "wood", "ore", "mercury", "sulfur", "crystal", "gems"]
 
     PLAYER_COLORS = {
         "Red": "#FF0000",
