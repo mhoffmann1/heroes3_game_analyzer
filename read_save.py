@@ -6,6 +6,7 @@ import math
 import os
 import re
 import sys
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -91,7 +92,7 @@ def parse_game_info(mapdata, towns):
         
         # Extract player town choices (e.g., 'red town choice is tower')
         try:
-            matches = re.findall(r"(red|blue) town choice is (\w+)", desc_data, re.IGNORECASE)
+            matches = re.findall(r"(red|blue|tan) town choice is (\w+)", desc_data, re.IGNORECASE)
             game_info["player_towns"] = {player.lower(): faction.capitalize() for player, faction in matches}
         except (AttributeError, TypeError):
             pass
@@ -135,7 +136,29 @@ def calculate_army_strength(army, attack_skill, defense_skill, ai_values):
     # Army strength = total AI Value * H
     return round(total_ai_value * H, 2)
 
-def extract_game_data(save, ai_values, dragon_utopia_state):
+def calculate_army_hitpoints(army, unit_stats):
+    total_hitpoints = 0
+    for unit in army:
+        unit_name = unit.get("name", "")
+        unit_count = unit.get("count", "")
+        for unit_stat in unit_stats["units"]:
+            if unit_stat["Name"] == unit_name:
+                unit_hp = unit_stat.get("HP",0)
+                break
+        total_hitpoints += (unit_hp * unit_count)
+    return total_hitpoints
+
+def calculate_army_levels(army, unit_stats):
+    army_levels = defaultdict(int)
+    for unit in army:
+        unit_name = unit.get("name", "")
+        unit_count = unit.get("count", "")
+        for unit_stat in unit_stats["units"]:
+            if unit_stat["Name"] == unit_name:
+                army_levels[str(unit_stat["Level"])] += unit_count
+    return army_levels
+
+def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
     """Extract stats for all heroes and towns in the savegame."""
     heroes = []
 
@@ -168,8 +191,10 @@ def extract_game_data(save, ai_values, dragon_utopia_state):
                 attack_skill = stats.get("attack", 0)
                 defense_skill = stats.get("defense", 0)
                 
-                # Calculate army strength
+                # Calculate army stats
                 army_strength = calculate_army_strength(army, attack_skill, defense_skill, ai_values)
+                army_hitpoints = calculate_army_hitpoints(army, unit_stats)
+                army_levels = calculate_army_levels(army, unit_stats)
                 
                 hero_data = {
                     "name": hero_name,
@@ -189,6 +214,8 @@ def extract_game_data(save, ai_values, dragon_utopia_state):
                     "owner": hero.owner,
                     "army": army,
                     "army_strength": army_strength,
+                    "army_hitpoints": army_hitpoints,
+                    "army_levels": army_levels,
                     "spells": list(spells),
                     "artifact_spells": list(artifact_spells),
                     "has_dd": spell_known("Dimension Door", spells) or spell_known("Dimension Door", artifact_spells),
@@ -208,8 +235,8 @@ def extract_game_data(save, ai_values, dragon_utopia_state):
 
     #print(f"towns: {towns}")
     for town in towns:
-        army_strength = calculate_army_strength(town['garrison'], 0, 0, ai_values)
-        town['army_strength'] = army_strength
+        town['army_strength'] = calculate_army_strength(town['garrison'], 0, 0, ai_values)
+        town['army_hitpoints'] = calculate_army_hitpoints(town['garrison'], unit_stats)
 
     resources = getattr(save, "player_resources")
     #logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
@@ -362,6 +389,7 @@ def aggregate_player_data(json_data, utopia_tracker):
     for player in colors:
         players[player]['town_count'] = len(players[player]['towns'])
         players[player]['total_strength'] = get_total_army_strength(players[player])
+        players[player]['total_hitpoints'] = get_total_army_hitpoints(players[player])
         players[player]['heroes_strength'] = get_army_heroes_strength(players[player])
         players[player]['garrison_strength'] = get_army_garrison_strength(players[player])
 
@@ -372,6 +400,24 @@ def aggregate_player_data(json_data, utopia_tracker):
         'game_info': game_info,
         'players': players        
     }
+
+def get_total_army_hitpoints(player):
+    total_army_hitpoints = 0
+    total_army_hitpoints += get_army_hitpoints_heroes(player)
+    total_army_hitpoints += get_army_hitpoints_garrison(player)
+    return total_army_hitpoints
+
+def get_army_hitpoints_heroes(player):
+    heroes_army_hitpoints = 0
+    for hero in player['heroes']:
+        heroes_army_hitpoints += hero['army_hitpoints']
+    return heroes_army_hitpoints
+
+def get_army_hitpoints_garrison(player):
+    garrison_army_hitpoints = 0
+    for town in player['towns']:
+        garrison_army_hitpoints += town['army_hitpoints']
+    return garrison_army_hitpoints
 
 def get_total_army_strength(player):
     total_army_strength = 0.0
@@ -385,14 +431,12 @@ def get_army_heroes_strength(player):
     heroes_army_strength = 0.0
     for hero in player['heroes']:
         heroes_army_strength += hero['army_strength']
-    
     return round(heroes_army_strength, 2)
 
 def get_army_garrison_strength(player):
     garrison_army_strength = 0.0
     for town in player['towns']:
         garrison_army_strength += town['army_strength']
-
     return round(garrison_army_strength, 2)
 
 def setup_logger(logfile):
@@ -451,6 +495,9 @@ def main():
         try:
             with open("creature_ai_values.json", "r") as f:
                 ai_values = json.load(f)
+            with open("unit_stats.json", "r") as f:
+                unit_stats = json.load(f)
+                
         except FileNotFoundError:
             logger.error("creature_ai_values.json not found in current directory")
             sys.exit(1)
@@ -464,7 +511,7 @@ def main():
         if os.path.isfile(input_path):
             # Single file mode
             logger.info(f"Processing single savegame: {input_path}")
-            raw_data, player_data = process_file(input_path, ai_values, dragon_utopia_state, args.output, utopia_tracker)
+            raw_data, player_data = process_file(input_path, ai_values, unit_stats, dragon_utopia_state, args.output, utopia_tracker)
 
             # Save raw data
             save_to_json(raw_data, args.output)
@@ -505,6 +552,7 @@ def main():
                     raw_data, player_data = process_file(
                         filepath,
                         ai_values,
+                        unit_stats,
                         dragon_utopia_state,
                         os.path.join(args.output, filename + ".json"),
                         utopia_tracker,
@@ -547,11 +595,11 @@ def main():
         sys.exit(1)
 
 
-def process_file(filepath, ai_values, dragon_utopia_state, output_file, utopia_tracker, save_individual=True):
+def process_file(filepath, ai_values, unit_stats, dragon_utopia_state, output_file, utopia_tracker, save_individual=True):
     logger.debug(f"Loading save: {filepath}")
     save = load_savegame(filepath)
     logger.debug(f"Extracting game data...")
-    raw_data, tracker_update = extract_game_data(save, ai_values, dragon_utopia_state)
+    raw_data, tracker_update = extract_game_data(save, ai_values, unit_stats, dragon_utopia_state)
     utopia_tracker.merge(tracker_update)
     player_data = aggregate_player_data(raw_data, utopia_tracker)
 

@@ -57,6 +57,7 @@ def parse_data(data):
                         "hero_name": hero_name,
                         "experience": hero_data.get("experience", 0),
                         "army_strength": hero_data.get("army_strength", 0),
+                        "army_hitpoints": hero_data.get("army_hitpoints",0),
                         "attack": hero_data.get("primary_skills", {}).get("attack", 0),
                         "defense": hero_data.get("primary_skills", {}).get("defense", 0),
                         "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
@@ -76,6 +77,7 @@ def parse_data(data):
                         "hero_name": hero_name,
                         "experience": hero_data.get("experience", 0),
                         "army_strength": hero_data.get("army_strength", 0),
+                        "army_hitpoints": hero_data.get("army_hitpoints",0),
                         "attack": hero_data.get("primary_skills", {}).get("attack", 0),
                         "defense": hero_data.get("primary_skills", {}).get("defense", 0),
                         "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
@@ -108,6 +110,7 @@ def parse_data(data):
                 "total_hero_army_strength": player_data.get("heroes_strength", 0),
                 "total_garrison_army_strength": player_data.get("garrison_strength", 0),
                 "total_army_strength": player_data.get("total_strength", 0),
+                "total_army_hitpoints": player_data.get("total_hitpoints", 0),
                 "tiles_explored": player_data.get("tiles_explored", 0),
                 "fog_of_war": player_data.get("fog_of_war",'')
             })
@@ -143,10 +146,10 @@ def run_dashboard(df_heroes, df_players, df_turn_time, game_info, port):
 
     player_options = sorted(df_heroes["player_color"].dropna().unique())
     hero_options = sorted(df_heroes["hero_name"].dropna().unique())
-    metric_options = ["experience", "army_strength", "attack", "defense", "power", "knowledge"]
+    metric_options = ["experience", "army_strength", "army_hitpoints", "attack", "defense", "power", "knowledge"]
     player_metric_options = ["gold", "town_count", "total_army_strength", "total_hero_army_strength", 
-                             "total_garrison_army_strength", "visited_utopias", "tiles_explored",
-                             "wood", "ore", "mercury", "sulfur", "crystal", "gems"]
+                             "total_garrison_army_strength", "total_army_hitpoints", "visited_utopias",
+                             "tiles_explored", "wood", "ore", "mercury", "sulfur", "crystal", "gems"]
 
     PLAYER_COLORS = {
         "Red": "#FF0000",
@@ -194,16 +197,6 @@ def run_dashboard(df_heroes, df_players, df_turn_time, game_info, port):
         html.Div([
             html.H2("Turn Duration Per Turn"),
             dcc.Graph(id="turn_time_chart", style={'width': '100%'}),
-            #dcc.Graph(
-            #    id="turn_time_chart",
-            #    figure=px.bar(
-            #        df_turn_time,
-            #        x="turn",
-            #        y="turn_time_sec",
-            #        labels={"turn": "Turn", "turn_time_sec": "Turn Time (s)"},
-            #        title="Turn Duration per Turn"
-            #    )
-            #),
 
             html.H2("Hero Metrics Over Time"),
 
@@ -243,7 +236,7 @@ def run_dashboard(df_heroes, df_players, df_turn_time, game_info, port):
             dcc.Dropdown(
                 id="player_metric_selector",
                 options=[{"label": m.capitalize(), "value": m} for m in player_metric_options],
-                value=["town_count", "gold"],
+                value=["gold"],
                 multi=True
             ),
         ], style={"width": "50%", "marginBottom": "30px"}),
