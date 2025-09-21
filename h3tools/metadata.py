@@ -1523,7 +1523,7 @@ class Savefile(object):
         self.player_resources = self.extract_player_sections(self.raw)
 
         self.update_info()
-        logger.info("Opened %s (%s, unzipped %s).", self.filename,
+        logger.debug("Opened %s (%s, unzipped %s).", self.filename,
                     util.format_bytes(self.size), util.format_bytes(self.usize))
         
     def list_maptiles(self):
@@ -1597,7 +1597,7 @@ class Savefile(object):
         self.mapdata["game"] = self.version
         if self.version in h3tools.version.VERSIONS:
             self.mapdata["game"] = h3tools.version.VERSIONS[self.version].TITLE
-        logger.info("Detected %s as version %r.", self.filename, self.version)
+        logger.debug("Detected %s as version %r.", self.filename, self.version)
     
     def extract_player_sections(self, raw_data):
         """Dynamically detect and extract 200-byte player blocks for 8 HotA players."""
@@ -1810,7 +1810,7 @@ class Savefile(object):
 
                         if self.town_section_start is None:
                             self.town_section_start = name_start
-                            logger.info(f"First town found at offset 0x{name_start:08X} — stored as town_section_start")
+                            logger.debug(f"First town found at offset 0x{name_start:08X} — stored as town_section_start")
                     else:
                         logger.debug(f"Invalid town name, bytes contain NULL: {name_bytes}")
                     break

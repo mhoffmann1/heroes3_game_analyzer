@@ -68,7 +68,6 @@ def parse_game_info(mapdata, towns):
     # Parse mapdata['desc'] for map name and other details
     desc_data = mapdata.get("desc", "")
     if desc_data:
-        print(f"Game info: {desc_data}")
         # Extract map name
         try:
             map_name_match = re.search(r"Template was[^,]*", desc_data)
@@ -237,6 +236,7 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
     for town in towns:
         town['army_strength'] = calculate_army_strength(town['garrison'], 0, 0, ai_values)
         town['army_hitpoints'] = calculate_army_hitpoints(town['garrison'], unit_stats)
+        town['army_levels'] = calculate_army_levels(town['garrison'], unit_stats)
 
     resources = getattr(save, "player_resources")
     #logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
@@ -249,10 +249,10 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
     tracker = UtopiaTracker()
 
     if not dragon_utopia_state:
-        logger.info(f"Extracting Dragon Utopias from map files...")
+        logger.debug(f"Extracting Dragon Utopias from map files...")
         
         if not save.maptiles:
-            logger.info("No valid map tiles found.")
+            logger.debug("No valid map tiles found.")
         else:
             logger.debug(f"Checking {len(save.maptiles)} tiles.")
         for idx, (offset, tile, size) in enumerate(save.maptiles):
@@ -263,7 +263,7 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
 
         game_info['total_utopias'] = len(dragon_utopia_state)
 
-        logger.info(f"Utopias found: {len(dragon_utopia_state)}")
+        logger.debug(f"Utopias found: {len(dragon_utopia_state)}")
 
         # Run this to see Dragon Utopia details on map
         # Should go to logs
@@ -346,7 +346,7 @@ def aggregate_player_data(json_data, utopia_tracker):
 
     
     visited_utopias_summary = utopia_tracker.as_dict()
-    logger.info(f"Tracker data acquired for players: {visited_utopias_summary}")
+    logger.debug(f"Tracker data acquired for players: {visited_utopias_summary}")
     
     # Initialize player data structure
     for color in colors:
