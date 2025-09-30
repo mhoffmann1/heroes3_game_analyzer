@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+import re
 
 import dash
 import numpy as np
@@ -30,6 +31,7 @@ def parse_data(data):
     player_rows = []
     turn_time = []
     game_info = None
+    hero_army_levels = []
 
     for entry in data:
         filename = entry.get("filename", "")
@@ -66,9 +68,19 @@ def parse_data(data):
                         "has_fly": hero_data.get("has_fly", False),
                         "has_tp": hero_data.get("has_tp", False),
                     }
+                    # Section for collecting hero army level stats
+                    hero_army_levels_entry = {
+                        "Hero": hero_name,
+                        "Owner": player_color.capitalize(),
+                        "Day": day
+                        }
+                    hero_army_levels_entry.update(hero_data.get("army_levels", {}))
+                    hero_army_levels.append(hero_army_levels_entry)
+
                     if not all(isinstance(val, int) for val in [hero['attack'], hero["defense"],hero["power"],hero["knowledge"]]):
                         continue
                     hero_rows.append(hero)
+
             elif isinstance(heroes, dict):
                 for hero_name, hero_data in heroes.items():
                     hero = {
@@ -86,6 +98,16 @@ def parse_data(data):
                         "has_fly": hero_data.get("has_fly", False),
                         "has_tp": hero_data.get("has_tp", False),
                     }
+
+                    # Section for collecting hero army level stats
+                    hero_army_levels_entry = {
+                        "Hero": hero_name,
+                        "Owner": player_color.capitalize(),
+                        "Day": day
+                        }
+                    hero_army_levels_entry.update(hero_data.get("army_levels", {}))
+                    hero_army_levels.append(hero_army_levels_entry)
+
                     if not all(isinstance(val, int) for val in [hero['attack'], hero["defense"],hero["power"],hero["knowledge"]]):
                         logger.debug(f"Detected hero {hero_name} with invalid skill value.")
                         continue
@@ -115,14 +137,27 @@ def parse_data(data):
                 "fog_of_war": player_data.get("fog_of_war",'')
             })
 
+    df_heroes_army_levels = pd.DataFrame(hero_army_levels).fillna(0)
+    army_cols = [c for c in df_heroes_army_levels if c not in ["Hero", "Owner", "Day"]]
+    df_heroes_army_levels[army_cols] = df_heroes_army_levels[army_cols].fillna(0).astype(int)
+    sorted_cols = ["Hero", "Owner", "Day"] + sorted(army_cols, key=sort_key)
+    df_heroes_army_levels = df_heroes_army_levels[sorted_cols]
 
     df_heroes = pd.DataFrame(hero_rows)
     df_players = pd.DataFrame(player_rows)
     df_turntime = pd.DataFrame(turn_time, columns=["turn_time"])
     df_turntime["turn_time_sec"] = df_turntime["turn_time"].astype(int)
 
-    return df_heroes, df_players, game_info, df_turntime
+    print(df_heroes_army_levels.head())
+    
+    return df_heroes, df_heroes_army_levels, df_players, game_info, df_turntime
 
+def sort_key(col):
+    # Try to extract the leading number
+    match = re.match(r"(\d+)", col)
+    if match:
+        return int(match.group(1)), col  # first by number, then by raw string (so "2" before "2+")
+    return float("inf"), col  # put non-numeric stuff at the end
 
 def parse_day_from_filename(filename):
     try:
@@ -140,7 +175,7 @@ def parse_day_from_filename(filename):
     return None
 
 
-def run_dashboard(df_heroes, df_players, df_turn_time, game_info, port):
+def run_dashboard(df_heroes, df_heroes_army_levels, df_players, df_turn_time, game_info, port):
     app = dash.Dash(__name__)
     server = app.server
 
@@ -242,6 +277,31 @@ def run_dashboard(df_heroes, df_players, df_turn_time, game_info, port):
         ], style={"width": "50%", "marginBottom": "30px"}),
 
         dcc.Graph(id="player_chart"),
+
+        html.Hr(),
+
+        html.H2("Hero Army Levels Comparison"),
+
+        html.Label("Select Heroes"),
+        dcc.Dropdown(
+            id="army_hero_selector",
+            options=[{"label": h, "value": h} for h in hero_options],
+            value=hero_options[:3],  # show first 3 heroes by default
+            multi=True
+        ),
+
+        html.Label("Select Day"),
+        dcc.Slider(
+            id="army_day_slider",
+            min=df_heroes_army_levels["Day"].min(),
+            max=df_heroes_army_levels["Day"].max(),
+            step=1,
+            value=df_heroes_army_levels["Day"].max(),
+            marks={int(day): str(int(day)) for day in sorted(df_heroes_army_levels["Day"].unique())},
+            tooltip={"placement": "bottom", "always_visible": True}
+        ),
+
+        dcc.Graph(id="army_levels_chart"),
 
         html.H2("Town Ownership Distribution"),
 
@@ -431,6 +491,51 @@ def run_dashboard(df_heroes, df_players, df_turn_time, game_info, port):
             hovermode="x unified"
         )
         return fig
+
+    # Heroes army level progression
+
+    @app.callback(
+        Output("army_levels_chart", "figure"),
+        [
+            Input("army_hero_selector", "value"),
+            Input("army_day_slider", "value")
+        ]
+    )
+    def update_army_levels(selected_heroes, selected_day):
+        if not selected_heroes:
+            return go.Figure()
+
+        # Filter for chosen day & heroes
+        filtered = df_heroes_army_levels[
+            (df_heroes_army_levels["Day"] == selected_day) &
+            (df_heroes_army_levels["Hero"].isin(selected_heroes))
+        ]
+
+        if filtered.empty:
+            return go.Figure()
+
+        # Sort army level columns numerically
+        army_cols = [c for c in filtered.columns if c not in ["Hero", "Owner", "Day"]]
+        army_cols_sorted = sorted(army_cols, key=lambda x: (int(re.match(r"\d+", x).group()), x))
+
+        # Build stacked bar chart
+        fig = go.Figure()
+        for col in army_cols_sorted:
+            fig.add_trace(go.Bar(
+                x=filtered["Hero"],
+                y=filtered[col],
+                name=f"Level {col}"
+            ))
+
+        fig.update_layout(
+            barmode="stack",
+            title=f"Army Composition by Unit Level (Day {selected_day})",
+            xaxis_title="Hero",
+            yaxis_title="Number of Units",
+            legend_title="Unit Level"
+        )
+        return fig
+
 
     # Player-level chart
     @app.callback(
@@ -821,9 +926,9 @@ def main():
     args = parser.parse_args()
 
     data = load_combined_data(args.input_dir)
-    df_heroes, df_players, game_info, df_turn_time = parse_data(data)
+    df_heroes, df_heroes_army_levels, df_players, game_info, df_turn_time = parse_data(data)
 
-    run_dashboard(df_heroes, df_players, df_turn_time, game_info, args.port)
+    run_dashboard(df_heroes, df_heroes_army_levels, df_players, df_turn_time, game_info, args.port)
 
 
 if __name__ == "__main__":

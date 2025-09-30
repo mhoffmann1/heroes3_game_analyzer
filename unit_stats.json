@@ -1983,7 +1983,7 @@
       {
         "Name": "Sea Dog",
         "Town": "Cove",
-        "Level": "3++",
+        "Level": "3+",
         "Attack": 12,
         "Defense": 11,
         "DamageMin": 3,

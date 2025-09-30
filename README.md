@@ -42,13 +42,12 @@ Warning: AI Value not found for unit 'Leprechaun'
 
 ## Ideas
 
-Percentage of map discovered
- - substract tiles that cannot be traversed
-Map discovery animation
 
-Fix description and player names
 Hide number of cities and Utopia information - click to show. Not to spoil fun
-
 
 Find towns: use fixed town names:
 https://heroes.thelazy.net/index.php/List_of_all_town_names
+
+Stronghest hero (A+D formula)
+
+army units level percentage/numbers
