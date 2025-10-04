@@ -141,10 +141,6 @@ def parse_data(data):
     df_turntime = pd.DataFrame(turn_time, columns=["turn_time"])
     df_turntime["turn_time_sec"] = df_turntime["turn_time"].astype(int)
 
-    #print(df_heroes_army_levels.head())
-    print(f"Her army level info:\n {df_heroes_army_levels.head()}")
-    print(f"Town army level info:\n {df_towns_army_levels.head()}")
-    
     return df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turntime
 
 def create_hero_entry(hero_name, hero_data, player_color, day):
@@ -316,8 +312,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
 
         dcc.Graph(id="army_levels_chart"),
 
-        html.H2("Player Army Levels Comparison"),
-
+        html.H2("Player Army Composition Over Time"),
         html.Label("Select Players"),
         dcc.Dropdown(
             id="player_army_selector",
@@ -325,15 +320,19 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             value=[p for p in PLAYER_ORDER if p in df_players["player_color"].unique() and p != "None"],
             multi=True
         ),
+        html.Div([
+            html.Button("Play", id="player_army_play_btn", n_clicks=0),
+            html.Button("Pause", id="player_army_pause_btn", n_clicks=0),
+            dcc.Interval(id="player_army_anim_interval", interval=1000, n_intervals=0, disabled=True)
+        ], style={"margin": "10px 0"}),
 
-        html.Label("Select Day"),
         dcc.Slider(
             id="player_army_day_slider",
-            min=df_players["day"].min(),
-            max=df_players["day"].max(),
+            min=df_heroes_army_levels["Day"].min(),
+            max=df_heroes_army_levels["Day"].max(),
             step=1,
-            value=df_players["day"].max(),
-            marks={int(day): str(int(day)) for day in sorted(df_players["day"].unique())},
+            value=df_heroes_army_levels["Day"].min(),
+            marks={int(day): str(int(day)) for day in sorted(df_heroes_army_levels["Day"].unique())},
             tooltip={"placement": "bottom", "always_visible": True}
         ),
 
@@ -554,13 +553,25 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         army_cols = [c for c in filtered.columns if c not in ["Hero", "Owner", "Day"]]
         army_cols_sorted = sorted(army_cols, key=lambda x: (int(re.match(r"\d+", x).group()), x))
 
+        # Color mapping
+        level_colors = {
+            "1": "#C0C0C0", "1+": "#808080",
+            "2": "#90EE90", "2+": "#006400",
+            "3": "#87CEFA", "3+": "#00008B",
+            "4": "#FFA500", "4+": "#FF4500",
+            "5": "#9370DB", "5+": "#4B0082",
+            "6": "#FF6347", "6+": "#8B0000",
+            "7": "#2F4F4F", "7+": "#000000"
+        }
+
         # Build stacked bar chart
         fig = go.Figure()
         for col in army_cols_sorted:
             fig.add_trace(go.Bar(
                 x=filtered["Hero"],
                 y=filtered[col],
-                name=f"Level {col}"
+                name=f"Level {col}",
+                marker=dict(color=level_colors.get(col, "#AAAAAA"))  # fallback gray
             ))
 
         fig.update_layout(
@@ -573,7 +584,37 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         return fig
 
 
-    # Player-level chart
+
+    # Player-level charts
+
+    @app.callback(
+        Output("player_army_anim_interval", "disabled"),
+        Input("player_army_play_btn", "n_clicks"),
+        Input("player_army_pause_btn", "n_clicks"),
+        prevent_initial_call=True
+    )
+    def toggle_player_army_animation(play_clicks, pause_clicks):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            raise dash.exceptions.PreventUpdate
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        return button_id != "player_army_play_btn"  # Play enables, Pause disables
+        
+    @app.callback(
+        Output("player_army_day_slider", "value"),
+        Input("player_army_anim_interval", "n_intervals"),
+        State("player_army_day_slider", "value"),
+        State("player_army_day_slider", "min"),
+        State("player_army_day_slider", "max"),
+        prevent_initial_call=True
+    )
+    def animate_player_army_days(n_intervals, current_day, min_day, max_day):
+        next_day = current_day + 1
+        if next_day > max_day:
+            return min_day  # loop back
+        return next_day
+
+
     @app.callback(
         Output("player_chart", "figure"),
         Input("player_selector", "value"),
