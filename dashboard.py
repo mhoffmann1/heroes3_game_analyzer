@@ -28,10 +28,12 @@ def load_combined_data(directory):
 
 def parse_data(data):
     hero_rows = []
+    town_rows = []
     player_rows = []
     turn_time = []
     game_info = None
     hero_army_levels = []
+    town_army_levels = []
 
     for entry in data:
         filename = entry.get("filename", "")
@@ -53,21 +55,7 @@ def parse_data(data):
             if isinstance(heroes, list):
                 for hero_data in heroes:
                     hero_name = hero_data.get("name", "Unknown")
-                    hero = {
-                        "day": day,
-                        "player_color": player_color.capitalize(),
-                        "hero_name": hero_name,
-                        "experience": hero_data.get("experience", 0),
-                        "army_strength": hero_data.get("army_strength", 0),
-                        "army_hitpoints": hero_data.get("army_hitpoints",0),
-                        "attack": hero_data.get("primary_skills", {}).get("attack", 0),
-                        "defense": hero_data.get("primary_skills", {}).get("defense", 0),
-                        "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
-                        "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0),
-                        "has_dd": hero_data.get("has_dd", False),
-                        "has_fly": hero_data.get("has_fly", False),
-                        "has_tp": hero_data.get("has_tp", False),
-                    }
+                    hero = create_hero_entry(hero_name, hero_data, player_color.capitalize(), day)
                     # Section for collecting hero army level stats
                     hero_army_levels_entry = {
                         "Hero": hero_name,
@@ -83,21 +71,7 @@ def parse_data(data):
 
             elif isinstance(heroes, dict):
                 for hero_name, hero_data in heroes.items():
-                    hero = {
-                        "day": day,
-                        "player_color": player_color.capitalize(),
-                        "hero_name": hero_name,
-                        "experience": hero_data.get("experience", 0),
-                        "army_strength": hero_data.get("army_strength", 0),
-                        "army_hitpoints": hero_data.get("army_hitpoints",0),
-                        "attack": hero_data.get("primary_skills", {}).get("attack", 0),
-                        "defense": hero_data.get("primary_skills", {}).get("defense", 0),
-                        "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
-                        "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0),
-                        "has_dd": hero_data.get("has_dd", False),
-                        "has_fly": hero_data.get("has_fly", False),
-                        "has_tp": hero_data.get("has_tp", False),
-                    }
+                    hero = create_hero_entry(hero_name, hero_data, player_color.capitalize(), day)
 
                     # Section for collecting hero army level stats
                     hero_army_levels_entry = {
@@ -112,6 +86,17 @@ def parse_data(data):
                         logger.debug(f"Detected hero {hero_name} with invalid skill value.")
                         continue
                     hero_rows.append(hero)
+
+            towns = player_data.get("towns", {})
+            for town_data in towns:
+                town_name = town_data.get("name", "Unknown")
+                town_army_levels_entry = {
+                    "Town": town_name,
+                    "Owner": player_color.capitalize(),
+                    "Day": day
+                }
+                town_army_levels_entry.update(town_data.get("army_levels", {}))
+                town_army_levels.append(town_army_levels_entry)
 
             # Map size:
             #total_tiles = pow(game_info['map_size'],2)*game_info['levels']
@@ -137,20 +122,48 @@ def parse_data(data):
                 "fog_of_war": player_data.get("fog_of_war",'')
             })
 
+    # Create Panda DataFrame from hero army levels
     df_heroes_army_levels = pd.DataFrame(hero_army_levels).fillna(0)
     army_cols = [c for c in df_heroes_army_levels if c not in ["Hero", "Owner", "Day"]]
     df_heroes_army_levels[army_cols] = df_heroes_army_levels[army_cols].fillna(0).astype(int)
     sorted_cols = ["Hero", "Owner", "Day"] + sorted(army_cols, key=sort_key)
     df_heroes_army_levels = df_heroes_army_levels[sorted_cols]
 
+    # Create Panda DataFrame from town army levels
+    df_towns_army_levels = pd.DataFrame(town_army_levels).fillna(0)
+    army_cols = [c for c in df_towns_army_levels if c not in ["Town", "Owner", "Day"]]
+    df_towns_army_levels[army_cols] = df_towns_army_levels[army_cols].fillna(0).astype(int)
+    sorted_cols = ["Town", "Owner", "Day"] + sorted(army_cols, key=sort_key)
+    df_towns_army_levels = df_towns_army_levels[sorted_cols]
+
     df_heroes = pd.DataFrame(hero_rows)
     df_players = pd.DataFrame(player_rows)
     df_turntime = pd.DataFrame(turn_time, columns=["turn_time"])
     df_turntime["turn_time_sec"] = df_turntime["turn_time"].astype(int)
 
-    print(df_heroes_army_levels.head())
+    #print(df_heroes_army_levels.head())
+    print(f"Her army level info:\n {df_heroes_army_levels.head()}")
+    print(f"Town army level info:\n {df_towns_army_levels.head()}")
     
-    return df_heroes, df_heroes_army_levels, df_players, game_info, df_turntime
+    return df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turntime
+
+def create_hero_entry(hero_name, hero_data, player_color, day):
+    hero = {
+        "day": day,
+        "player_color": player_color,
+        "hero_name": hero_name,
+        "experience": hero_data.get("experience", 0),
+        "army_strength": hero_data.get("army_strength", 0),
+        "army_hitpoints": hero_data.get("army_hitpoints",0),
+        "attack": hero_data.get("primary_skills", {}).get("attack", 0),
+        "defense": hero_data.get("primary_skills", {}).get("defense", 0),
+        "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
+        "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0),
+        "has_dd": hero_data.get("has_dd", False),
+        "has_fly": hero_data.get("has_fly", False),
+        "has_tp": hero_data.get("has_tp", False),
+        }
+    return hero
 
 def sort_key(col):
     # Try to extract the leading number
@@ -175,7 +188,7 @@ def parse_day_from_filename(filename):
     return None
 
 
-def run_dashboard(df_heroes, df_heroes_army_levels, df_players, df_turn_time, game_info, port):
+def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, port):
     app = dash.Dash(__name__)
     server = app.server
 
@@ -302,6 +315,29 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_players, df_turn_time, ga
         ),
 
         dcc.Graph(id="army_levels_chart"),
+
+        html.H2("Player Army Levels Comparison"),
+
+        html.Label("Select Players"),
+        dcc.Dropdown(
+            id="player_army_selector",
+            options=[{"label": p, "value": p} for p in PLAYER_ORDER if p in df_players["player_color"].unique()],
+            value=[p for p in PLAYER_ORDER if p in df_players["player_color"].unique() and p != "None"],
+            multi=True
+        ),
+
+        html.Label("Select Day"),
+        dcc.Slider(
+            id="player_army_day_slider",
+            min=df_players["day"].min(),
+            max=df_players["day"].max(),
+            step=1,
+            value=df_players["day"].max(),
+            marks={int(day): str(int(day)) for day in sorted(df_players["day"].unique())},
+            tooltip={"placement": "bottom", "always_visible": True}
+        ),
+
+        dcc.Graph(id="player_army_levels_chart"),
 
         html.H2("Town Ownership Distribution"),
 
@@ -605,6 +641,91 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_players, df_turn_time, ga
 
         return fig
     
+    @app.callback(
+        Output("player_army_levels_chart", "figure"),
+        [
+            Input("player_army_selector", "value"),
+            Input("player_army_day_slider", "value")
+        ]
+    )
+    def update_player_army_levels(selected_players, selected_day):
+        if not selected_players:
+            return go.Figure()
+
+        # Filter to selected day
+        heroes_filtered = df_heroes_army_levels[df_heroes_army_levels["Day"] == selected_day].copy()
+        towns_filtered  = df_towns_army_levels[df_towns_army_levels["Day"] == selected_day].copy()
+
+        # Army columns = union of heroes+towns minus non-army columns
+        exclude_cols = {"Hero", "Town", "Owner", "Day"}
+        army_cols = sorted((set(heroes_filtered.columns) | set(towns_filtered.columns)) - exclude_cols)
+
+        # Ensure both have same army columns
+        for col in army_cols:
+            if col not in heroes_filtered:
+                heroes_filtered[col] = 0
+            if col not in towns_filtered:
+                towns_filtered[col] = 0
+
+        for df in (heroes_filtered, towns_filtered):
+            for col in army_cols:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+
+        # Group by Owner
+        heroes_grouped = heroes_filtered.groupby("Owner", as_index=False)[army_cols].sum()
+        towns_grouped  = towns_filtered.groupby("Owner",  as_index=False)[army_cols].sum()
+
+        # Merge hero + town contributions
+        combined = pd.merge(
+            heroes_grouped, towns_grouped,
+            on="Owner", how="outer", suffixes=("_h", "_t")
+        ).fillna(0)
+
+        # Collapse hero + town into total
+        for col in army_cols:
+            h_col, t_col = f"{col}_h", f"{col}_t"
+            h_vals = pd.to_numeric(combined[h_col], errors="coerce").fillna(0).astype(int) if h_col in combined else 0
+            t_vals = pd.to_numeric(combined[t_col], errors="coerce").fillna(0).astype(int) if t_col in combined else 0
+            combined[col] = h_vals + t_vals
+            combined.drop(columns=[c for c in (h_col, t_col) if c in combined], inplace=True)
+
+        # Filter only selected players
+        combined = combined[combined["Owner"].isin(selected_players)]
+        if combined.empty:
+            return go.Figure()
+
+        # Sort columns: 1, 1+, 2, 2+, ...
+        import re
+        def sort_key(c):
+            m = re.match(r"(\d+)", c)
+            return (int(m.group(1)), "+" in c) if m else (999, c)
+        army_cols_sorted = sorted(army_cols, key=sort_key)
+
+        # --- Build grouped stacked bar chart ---
+        fig = go.Figure()
+
+        for _, row in combined.iterrows():
+            owner = row["Owner"]
+            color = PLAYER_COLORS.get(owner, "#808080")  # default gray
+            fig.add_trace(go.Bar(
+                x=army_cols_sorted,
+                y=[row[col] for col in army_cols_sorted],
+                name=owner,
+                marker=dict(color=color),
+                opacity=0.9
+            ))
+
+        fig.update_layout(
+            barmode="group",  # bars side by side per level, colored by player
+            title=f"Total Army Composition by Player (Day {selected_day})",
+            xaxis_title="Unit Level",
+            yaxis_title="Number of Units",
+            legend_title="Player"
+        )
+
+        return fig
+
+
     # Spell availability
     @app.callback(
         Output("spell_chart", "figure"),
@@ -926,9 +1047,9 @@ def main():
     args = parser.parse_args()
 
     data = load_combined_data(args.input_dir)
-    df_heroes, df_heroes_army_levels, df_players, game_info, df_turn_time = parse_data(data)
+    df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turn_time = parse_data(data)
 
-    run_dashboard(df_heroes, df_heroes_army_levels, df_players, df_turn_time, game_info, args.port)
+    run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, args.port)
 
 
 if __name__ == "__main__":

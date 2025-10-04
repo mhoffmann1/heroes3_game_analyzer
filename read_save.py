@@ -392,6 +392,7 @@ def aggregate_player_data(json_data, utopia_tracker):
         players[player]['total_hitpoints'] = get_total_army_hitpoints(players[player])
         players[player]['heroes_strength'] = get_army_heroes_strength(players[player])
         players[player]['garrison_strength'] = get_army_garrison_strength(players[player])
+        #players[player]['army_levels_towns'] = get_army_levels_from_towns(players[player])
 
         if player != 'None':
             players[player]['visited_utopias'] = visited_utopias_summary[player]
@@ -418,6 +419,12 @@ def get_army_hitpoints_garrison(player):
     for town in player['towns']:
         garrison_army_hitpoints += town['army_hitpoints']
     return garrison_army_hitpoints
+
+#def get_army_levels_from_towns(player):
+#    garrison_army_strength = 0.0
+#    for town in player['towns']:
+#        garrison_army_strength += town['army_strength']
+#    return round(garrison_army_strength, 2)
 
 def get_total_army_strength(player):
     total_army_strength = 0.0
