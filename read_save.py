@@ -160,6 +160,7 @@ def calculate_army_levels(army, unit_stats):
 def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
     """Extract stats for all heroes and towns in the savegame."""
     heroes = []
+    utopias_summary = []
 
     try:
         for i, hero in enumerate(save.heroes):
@@ -267,8 +268,11 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
 
         # Run this to see Dragon Utopia details on map
         # Should go to logs
+        
         for utopia in dragon_utopia_state:
-            logger.debug(f"Utopia: {utopia.get_info()}")
+            utopia_summary = utopia.get_info()
+            logger.debug(f"Utopia: {utopia_summary}")
+            utopias_summary.append(utopia_summary)
     else:
         for index, utopia in enumerate(dragon_utopia_state):
 
@@ -304,7 +308,7 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
                         logger.info(f"There are 2 or more players that already had access to conquered Utopia, unable to determine who conquered it")
                  
     # Return both heroes and game info
-    return {"heroes": heroes, "game_info": game_info, "resources": resources}, tracker 
+    return {"heroes": heroes, "game_info": game_info, "resources": resources, "utopias": utopias_summary}, tracker 
 
 def find_single_one(bitmask: str) -> int | None:
     """
@@ -397,9 +401,15 @@ def aggregate_player_data(json_data, utopia_tracker):
         if player != 'None':
             players[player]['visited_utopias'] = visited_utopias_summary[player]
     
+    utopias = {}
+    for i, utopia in enumerate(json_data['utopias']):
+        utopias[i] = utopia
+
     return {
         'game_info': game_info,
-        'players': players        
+        'players': players,
+        'utopias': utopias
+                
     }
 
 def get_total_army_hitpoints(player):
