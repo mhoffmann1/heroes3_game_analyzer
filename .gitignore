@@ -4,6 +4,7 @@ h3tools/lib/__pycache__
 h3tools/version/__pycache__
 saves/
 games/
+processed_games/
 venv_heroes
 
 other

@@ -499,6 +499,8 @@ def main():
     )
     args = parser.parse_args()
 
+    args.output = os.path.join('processed_games', args.output)
+
     # Configure logging
 
     logger = setup_logger('h3_analyzer.log')
