@@ -562,7 +562,16 @@ def main():
             #dragon_utopia_state = []
 
             # Get creation time of GAME_BEGIN.GMX file
-            last_save_ctime = os.path.getctime(list(Path(input_path).glob("GAME_BEGIN.GM*"))[0])
+            start_file = list(Path(input_path).glob("GAME_BEGIN.GM*"))
+            if start_file:
+                last_save_ctime = os.path.getctime(start_file[0])
+            else:
+                fallback = list(Path(input_path).glob("111.GM*"))
+                if fallback:
+                    last_save_ctime = os.path.getctime(fallback[0]) - 180
+                else:
+                    raise FileNotFoundError("Neither GAME_BEGIN.GM* nor 111.GM* found in input_path")
+            #last_save_ctime = os.path.getctime(list(Path(input_path).glob("GAME_BEGIN.GM*"))[0])
             previous_known_turn_time = 60
 
             for filename in tqdm(files, desc="Processing saves"):
