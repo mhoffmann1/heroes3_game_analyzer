@@ -51,3 +51,5 @@ https://heroes.thelazy.net/index.php/List_of_all_town_names
 Stronghest hero (A+D formula)
 
 army units level percentage/numbers
+
+Custom town name exclude Talirindę

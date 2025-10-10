@@ -1197,6 +1197,76 @@ for t in SPELLS:
     SCROLL_ARTIFACTS.append(n)
 
 
+TOWN_NAMES = [
+    # Castle
+    "Alexandretta", "Armitage", "Brettonia", "Castellatus", "Claxton", "Cornerstone",
+    "Dunwall", "Gateway", "Highcastle", "Kanan", "Kildare", "Middleheim",
+    "Transom", "Whistledale", "Whitemoon", "Whitestone",
+    # Rampart
+    "Bath'iere", "Ceiliedgh", "Elfwind", "Emerald Moor", "Forest", "Forest Glen",
+    "Fortune Keep", "Green Falls", "Gladeroot", "Marishen", "Rainhaven",
+    "Serenity", "Still Water", "Strongglen", "Wild Willow", "Wise Oak",
+    # Tower
+    "Athenaeum", "Ayer", "Cloudfire", "Cloudspire", "Corona", "Equinox",
+    "Facture", "Fallen Star", "Machina", "Manufactury", "Mystos", "Silverspire",
+    "Silverwing", "Stronggale", "Tirith", "Valtara",
+    # Inferno
+    "Abaddon", "Acheron", "Ashcombe", "Ashden", "Blackburn", "Brimstone",
+    "Candent", "Cinderspire", "Daemon Gate", "Enkindle", "Firebrand", "Gehenna",
+    "Hellwind", "Stygius", "Styx", "Tartaros",
+    # Necropolis
+    "Agony", "Blackquarter", "Blight", "Cessacioun", "Coldreign", "Coldsoul",
+    "Dark Cloud", "Dark Eternal", "Death's Gate", "Ghostwind", "Grave Raven",
+    "Haunt's Wind", "Sanctum", "Shadow Keep", "Terminus", "Worm Warren",
+    # Dungeon
+    "Blindroot", "Castigare", "Chillwater", "Coldshadow", "Darkburrow", "Darkhold",
+    "Deepshadow", "Dragonnade", "Evernight", "Lost Hold", "Malev", "Scar",
+    "Shade", "Shadowden", "Sorrow Crown", "Veks",
+    # Stronghold
+    "Battlement", "Bocc", "Cragmoor", "Dolere", "Drago Breach", "Dragonspire",
+    "Hartgrim", "Kragg", "Kruber", "Morganheim", "Rockwarren", "Rovener",
+    "Sandflash", "Slau", "Strongglen", "Tormina",
+    # Fortress
+    "Backwater", "Coolmire", "Deadfall", "Deadwood", "Drakenmoor", "Edgewater",
+    "Hermit Cove", "Lostmoor", "Marshank", "Marshchoke", "Marshwall", "Mossden",
+    "Mosswood", "Mudshire", "Silt", "Stillbog",
+    # Conflux
+    "Ceald", "Electrising", "Elementon", "Fenderen", "Fleogan Mills", "Froisan",
+    "Igne", "Lagumoor", "Lanting", "Magmetin", "Massein", "Solium",
+    "Styriam", "Ventu", "Vluchton", "Wazzar",
+    # Cove
+    "Brown's Bay", "Downhaven", "Hitchgrove", "Jordanhall", "Lakenshire", "Lewindale",
+    "Nithenes", "Noral", "Port Crowland", "Port Evendore", "Rotunda", "Sleepy Creek",
+    "Tartaglia", "Walendale", "Watergate", "Westland Pier",
+    # Factory
+    "Arcadia", "Ardon", "Aurichalcum", "Burton", "Corakstone", "Darentor",
+    "Endurance", "Fort Rotwang", "Kergar", "Mount Copper", "New Dolere", "Prospero",
+    "Ridder", "Salda", "Volta", "Vulcan",
+    # Custom / campaign names
+    "Plinth", "Mirham", "Terraneus", "Trailia", "Caryatid", "Fair Feather",
+    "Steadwick", "Kleesive", "Stonecastle", "Avalon", "Welnin", "Defiance",
+    "Marshallston", "Pandathalyn", "Southerdale", "Nothenden", "Endelstadt",
+    "Goldenton", "Jhantaqua", "Noximaar", "Darqtane", "Dova Saera", "Moribund",
+    "Dragonbane", "Whitespire", "Kaffinar", "Ciara", "Soal", "Shelindria",
+    "Azrael Field", "Scorch", "Dagger Peak", "Vandal Hall", "Faler-on-Sea",
+    "Keventry", "Shaynda", "Gelliston", "Chillwater", "Bane Bridge", "Reaver Cove",
+    "Doom's Crest", "Sorrow Glen", "Asha's Cairn", "Flann", "Ultana", "Caledoorn",
+    "Zaridon", "Moortanis", "Jagos", "Reyn Tarrina", "Tormentalis", "Fayadon",
+    "Xent'a", "Kelvishen", "Xent'ara", "Shanimar", "Staeverin", "Andershire",
+    "Calembria", "Kreelah", "Aglorande", "Socon", "Decotta", "Harpy's Rock",
+    "Dead Timber", "Death Kiss", "Sinkhole", "Dank Rock", "Gruen Point",
+    "No Quarter", "Red Spider", "Gloom Cave", "Fetid Cavern", "Bat Fang",
+    "Camp Dracon", "Talirindë", "Ochre", "Asenius", "House Degab", "House Telez",
+    "House Vilmit", "House Kilgor", "Brastleton", "Scarlum", "Andara", "Hounde",
+    "Nokaneng", "Caprivi", "Djibo", "Tougane", "Plumtree", "Warrenton", "Zipfel",
+    "Nylstroom", "Rundu", "Kuruman", "Rakops", "Bangassou", "Thanel Falls",
+    "Aseranton", "Sehithwa", "Ghanzi", "Clifftree", "Leafhall", "Daggercourt",
+    "Timintal", "First Sword", "Second Sword", "Padon", "Groa", "Calarnen",
+    "Ulgak", "Hoddar", "Hartferd", "Willowglen", "Soledare", "Crypthome",
+    "Radstone"
+]
+
+
 @contextlib.contextmanager
 def patch_gzip_for_partial():
     """
@@ -1739,83 +1809,110 @@ class Savefile(object):
         return len(self.raw)  # Fallback to end of file if no heroes found
 
     def find_towns_by_header(self):
-        
+        """
+        Name-first town finder using TOWN_NAMES.
+        Looks up each town name in self.raw, verifies the string header (len + 0x00),
+        then extracts coords/owner/faction/garrison using known offsets relative to the
+        start of the town name.
+        """
+
         self.towns = []
-        
-        # Find towns based on summon portal structure - not great way, but works.
-        TOWN_HEADER = (
-            b'[\x01-\x71](?:'
-            b'\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-            b'|'
-            b'[\x00-\xb9]\x00\x00\x00[\x00-\xff]\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-            b')'
-            )
-        
-        for match in re.finditer(TOWN_HEADER, self.raw):
-            header_offset = match.start()
+        # keep existing value if set elsewhere
+        if not hasattr(self, "town_section_start"):
+            self.town_section_start = None
 
-            #logger.debug(f"Found potential town data sector at: {match}")
+        # Build a bytes regex: (name1|name2|...)
+        name_bytes_escaped = []
+        ascii_names = []
+        for n in TOWN_NAMES:
+            if not n:
+                continue
+            try:
+                nb = n.encode("ascii")
+            except UnicodeEncodeError:
+                # Skip non-ASCII names; your save strings here appear to be ASCII
+                if 'logger' in globals():
+                    logger.debug(f"Skipping non-ASCII town name: {n!r}")
+                continue
+            name_bytes_escaped.append(re.escape(nb))
+            ascii_names.append(n)
 
-            # Assume the length byte is at (header_offset - 303 - X -2)
-            # Since we don't know X yet, try candidate values
+        if not name_bytes_escaped:
+            if 'logger' in globals():
+                logger.warning("No ASCII town names available in TOWN_NAMES.")
+            return
 
-            max_name_length = 30  # reasonable max
+        pattern = re.compile(b"(" + b"|".join(name_bytes_escaped) + b")")
 
-            for possible_len in range(3, max_name_length + 1):
-                name_start = header_offset - 303 - possible_len
-                #null_sign = self.raw[name_start - 3]
-                length_byte = self.raw[name_start - 2]
-                separator = self.raw[name_start - 1]
+        seen_offsets = set()
+        for m in pattern.finditer(self.raw):
+            name_bytes = m.group(1)
+            name_start = m.start(1)
 
-                if length_byte == possible_len and separator == 0x00:
-                    name_bytes = self.raw[name_start: name_start + possible_len]
-                    if b'\x00' not in name_bytes:
-                        try:
-                            name = name_bytes.decode('ascii')
-                            #logger.info(f"Found town: {name}")
-                            #logger.info(f"Name bytes: {self.raw[name_start: name_start + possible_len].hex()} ")
+            # Need 2 bytes before name for (len, 0x00)
+            if name_start < 2:
+                continue
 
-                        except UnicodeDecodeError:
-                            name = "<decode error>"
+            # Verify string header: [len][0x00]<name...>
+            length_byte = self.raw[name_start - 2]
+            separator = self.raw[name_start - 1]
+            if length_byte != len(name_bytes) or separator != 0x00:
+                # Likely a stray appearance (e.g., rumor text) — skip
+                continue
 
-                        # Filter out any false positives by checking if name consists ASCII characters
-                        if not re.fullmatch(r"[A-Za-z ']*", name):
-                            #logger.info(f"Town: {name} does not contain valid characters - not a town, skipping.")
-                            continue
+            # Offsets relative to the start of the name (same as your previous logic)
+            coord_offset = name_start - 71
+            if coord_offset < 0:
+                continue
 
-                        coord_offset = name_start - 71 # Calculated manually
-                        #print(f"Coord bytes: {self.raw[coord_offset:coord_offset+10].hex()}")
+            # Extract coords and layer
+            try:
+                x = self.raw[coord_offset + 4]
+                y = self.raw[coord_offset + 5]
+                z = self.raw[coord_offset + 6]
+            except IndexError:
+                continue
 
-                        x = self.raw[coord_offset+4]
-                        y = self.raw[coord_offset+5]
-                        z = self.raw[coord_offset+6]
-                        level = 'Underground' if z == 1 else 'Surface'
+            # Basic sanity checks
+            if z not in (0, 1):
+                continue
+            map_size = getattr(self, "map_size", None)
+            if isinstance(map_size, int):
+                if not (0 <= x < map_size and 0 <= y < map_size):
+                    continue
 
-                        player = self.owner_colors.get(self.raw[coord_offset], "None")
-                        faction = self.faction_mapping.get(self.raw[coord_offset + 3])
+            owner = self.owner_colors.get(self.raw[coord_offset], "None")
+            faction = self.faction_mapping.get(self.raw[coord_offset + 3])
 
-                        # Garrison section
-                        garrison_offset = coord_offset + 9
-                        garrison = self.parse_garrison(garrison_offset)
+            garrison_offset = coord_offset + 9
+            garrison = self.parse_garrison(garrison_offset)
 
-                        town = {
-                            "name": name,
-                            "type": faction,
-                            "owner": player,
-                            "offset": name_start,
-                            "coords": [x, y, level],
-                            "garrison": garrison
-                        }
-                        self.towns.append(town)
+            # Decode name (safe: we built from ASCII)
+            name = name_bytes.decode("ascii")
 
-                        if self.town_section_start is None:
-                            self.town_section_start = name_start
-                            logger.debug(f"First town found at offset 0x{name_start:08X} — stored as town_section_start")
-                    else:
-                        logger.debug(f"Invalid town name, bytes contain NULL: {name_bytes}")
-                    break
-                #return results
+            if name_start not in seen_offsets:
+                self.towns.append({
+                    "name": name,
+                    "type": faction,
+                    "owner": owner,
+                    "offset": name_start,
+                    "coords": [x, y, "Underground" if z == 1 else "Surface"],
+                    "garrison": garrison,
+                })
+                seen_offsets.add(name_start)
+            
+                logger.info(f"Found {faction} town {name} controlled by {owner}. Garrison: {garrison}")
 
+                if self.town_section_start is None:
+                    self.town_section_start = name_start
+                    if 'logger' in globals():
+                        logger.debug(f"First town found at 0x{name_start:08X} — stored as town_section_start")
+
+        # Optional: fall back to your old header heuristic if nothing found
+        if not self.towns:
+            if 'logger' in globals():
+                logger.debug("Name-first scan yielded 0 towns; consider falling back to header heuristic.")
+            
     def parse_garrison(self, offset):
         garrison_start = offset
         creature_ids = []
