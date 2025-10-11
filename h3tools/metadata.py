@@ -1901,7 +1901,7 @@ class Savefile(object):
                 })
                 seen_offsets.add(name_start)
             
-                logger.info(f"Found {faction} town {name} controlled by {owner}. Garrison: {garrison}")
+                logger.debug(f"Found {faction} town {name} controlled by {owner}. Garrison: {garrison}")
 
                 if self.town_section_start is None:
                     self.town_section_start = name_start

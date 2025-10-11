@@ -735,6 +735,11 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         if combined.empty:
             return go.Figure()
 
+        # --- Enforce player order ---
+        PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
+        combined["Owner"] = pd.Categorical(combined["Owner"], categories=PLAYER_ORDER, ordered=True)
+        combined = combined.sort_values("Owner")
+
         # Sort columns: 1, 1+, 2, 2+, ...
         import re
         def sort_key(c):
