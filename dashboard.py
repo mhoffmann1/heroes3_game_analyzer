@@ -101,6 +101,7 @@ def parse_data(data):
                     hero_rows.append(hero)
 
             towns = player_data.get("towns", {})
+            
             for town_data in towns:
                 town_name = town_data.get("name", "Unknown")
                 town_army_levels_entry = {
@@ -110,6 +111,15 @@ def parse_data(data):
                 }
                 town_army_levels_entry.update(town_data.get("army_levels", {}))
                 town_army_levels.append(town_army_levels_entry)
+            
+            simplified_towns = [
+                {
+                    "town_name": t.get("name"),
+                    "town_type": t.get("type"),
+                    "coords": t.get("coords")
+                }
+                for t in towns
+            ]
 
             # Map size:
             #total_tiles = pow(game_info['map_size'],2)*game_info['levels']
@@ -126,6 +136,7 @@ def parse_data(data):
                 "crystal": player_data.get("resources", {}).get("crystals", 0),
                 "gems": player_data.get("resources", {}).get("gems", 0),
                 "town_count": player_data.get("town_count", 0),
+                "town_summary": simplified_towns,
                 "visited_utopias": player_data.get("visited_utopias", 0),
                 "total_hero_army_strength": player_data.get("heroes_strength", 0),
                 "total_garrison_army_strength": player_data.get("garrison_strength", 0),
@@ -1022,6 +1033,9 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             (df_players["day"] == selected_day)
         ].squeeze()
 
+        #print(f"simplified towns: {row.get('town_summary')}")
+        player_town_list = row.get("town_summary")
+
         fog = row.get("fog_of_war")
         if not fog:
             return go.Figure()
@@ -1065,7 +1079,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             # Add image
             data.append(go.Image(z=rgb_image_large, x0=x_offset, y0=0))
 
-            # === Add Utopia markers for this level (APPEND TO annotations) ===
+            # Add Utopia markers for this level (APPEND TO annotations)
             level_utopias = df_utopias[df_utopias["underground"] == (i == 1)]
 
             for _, utop in level_utopias.iterrows():
@@ -1086,6 +1100,29 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                         xanchor="center",
                         yanchor="middle"
                     ))
+
+            #Add town markers for this level ===
+            for town in player_town_list:
+                tx, ty, tlevel_str = town["coords"]
+                tlevel = 0 if tlevel_str == "Surface" else 1
+
+                if tlevel != i:
+                    continue
+                
+                if level_grid[ty, tx] == 1:
+                    plot_x = x_offset + (tx * scale_factor) + scale_factor / 2
+                    plot_y = (ty * scale_factor) + scale_factor / 2
+
+                    annotations.append(dict(
+                        x=plot_x,
+                        y=plot_y,
+                        text="■",
+                        showarrow=False,
+                        font=dict(size=18, color=marker_color, family="Arial Black"),
+                        xanchor="center",
+                        yanchor="middle"
+                    ))
+
 
             # Add label above image
             title = "Ground" if i == 0 else "Underground"
