@@ -34,6 +34,10 @@ def parse_data(data):
     game_info = None
     hero_army_levels = []
     town_army_levels = []
+    # static info for utopia (generated only for 1st turn)
+    # See line 248 in read save to remind yourself why.
+    # This can be done dynamically, but for now it isn't.
+    utopias = {}
 
     for entry in data:
         filename = entry.get("filename", "")
@@ -47,6 +51,15 @@ def parse_data(data):
         if not game_info:
             game_info = entry.get("game_info", {})
 
+        # Utopias will get uploaded only once - using data from 1st turn
+        if not len(utopias):
+            utopias = entry.get("utopias")
+        
+        # Convert utopias dict into a DataFrame
+        if isinstance(utopias, dict):
+            df_utopias = pd.DataFrame.from_dict(utopias, orient="index")
+        else:
+            df_utopias = pd.DataFrame()
 
         players = entry.get("players", {})
         for player_color, player_data in players.items():
@@ -141,7 +154,7 @@ def parse_data(data):
     df_turntime = pd.DataFrame(turn_time, columns=["turn_time"])
     df_turntime["turn_time_sec"] = df_turntime["turn_time"].astype(int)
 
-    return df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turntime
+    return df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turntime, df_utopias
 
 def create_hero_entry(hero_name, hero_data, player_color, day):
     hero = {
@@ -184,7 +197,7 @@ def parse_day_from_filename(filename):
     return None
 
 
-def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, port):
+def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, df_utopias, port):
     app = dash.Dash(__name__)
     server = app.server
 
@@ -1003,19 +1016,19 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
     def update_fog_map(player_color, selected_day):
         if not player_color or selected_day is None:
             return go.Figure()
-    
+
         row = df_players[
             (df_players["player_color"] == player_color) &
             (df_players["day"] == selected_day)
         ].squeeze()
-    
+
         fog = row.get("fog_of_war")
         if not fog:
             return go.Figure()
-    
+
         map_size = game_info.get("map_size", 36)
         levels = game_info.get("levels", 1)
-    
+
         tiles_per_level = map_size * map_size
         level_maps = []
         for level in range(levels):
@@ -1023,15 +1036,16 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             level_fog = fog[offset:offset + tiles_per_level]
             grid = np.array([int(c) for c in level_fog]).reshape((map_size, map_size))
             level_maps.append(grid)
-    
+
         player_rgb = PLAYER_COLORS.get(player_color, "#999999")
+        marker_color = get_contrasting_color(player_rgb)
         player_rgb_array = tuple(int(player_rgb.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
-    
+
         data = []
         annotations = []
         x_offset = 0
         scale_factor = 4  # Bigger images
-    
+
         for i, level_grid in enumerate(level_maps):
             rgb_image = np.zeros((map_size, map_size, 3), dtype=np.uint8)
             for y in range(map_size):
@@ -1040,28 +1054,55 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                         rgb_image[y, x] = player_rgb_array
                     else:
                         rgb_image[y, x] = (200, 200, 200)
-    
+
             # Scale bitmap
-            rgb_image_large = np.repeat(np.repeat(rgb_image, scale_factor, axis=0), scale_factor, axis=1)
-    
+            rgb_image_large = np.repeat(
+                np.repeat(rgb_image, scale_factor, axis=0),
+                scale_factor,
+                axis=1
+            )
+
             # Add image
             data.append(go.Image(z=rgb_image_large, x0=x_offset, y0=0))
-    
+
+            # === Add Utopia markers for this level (APPEND TO annotations) ===
+            level_utopias = df_utopias[df_utopias["underground"] == (i == 1)]
+
+            for _, utop in level_utopias.iterrows():
+                ux = utop["X"]
+                uy = utop["Y"]
+
+                # Only mark if explored
+                if level_grid[uy, ux] == 1:
+                    plot_x = x_offset + (ux * scale_factor) + scale_factor / 2
+                    plot_y = (uy * scale_factor) + scale_factor / 2
+
+                    annotations.append(dict(
+                        x=plot_x,
+                        y=plot_y,
+                        text="X",
+                        showarrow=False,
+                        font=dict(size=18, color=marker_color, family="Arial Black"),
+                        xanchor="center",
+                        yanchor="middle"
+                    ))
+
             # Add label above image
             title = "Ground" if i == 0 else "Underground"
             annotations.append(dict(
                 x=x_offset + rgb_image_large.shape[1] / 2,
-                y=-15,  # Slightly above the image
+                y=-15,
                 text=title,
                 showarrow=False,
                 font=dict(size=16, color="black"),
                 xanchor="center",
                 yanchor="bottom"
             ))
-    
-            # Shift for side-by-side display
-            x_offset += rgb_image_large.shape[1] + 20  # Spacing between levels
-    
+
+            # Move for next level (side-by-side)
+            x_offset += rgb_image_large.shape[1] + 20
+
+        # === Build figure AFTER all annotations collected ===
         fig = go.Figure(data=data)
         fig.update_layout(
             title=f"Fog of War - {player_color} - Day {selected_day}",
@@ -1069,14 +1110,21 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             xaxis=dict(visible=False),
             annotations=annotations,
             margin=dict(t=50, l=0, r=0, b=0),
-            width=1000,   # make chart wider
-            height=800    # make chart taller
+            width=1000,
+            height=800
         )
-    
+
         return fig
+
 
     app.run(debug=True, port=port)
 
+def get_contrasting_color(hex_color):
+    """Return black or white depending on contrast."""
+    rgb = tuple(int(hex_color.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
+    # Compute luminance
+    luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2])
+    return "white" if luminance < 140 else "black"
 
 def main():
     parser = argparse.ArgumentParser(description="Heroes 3 Savegame Dashboard")
@@ -1093,9 +1141,9 @@ def main():
     args = parser.parse_args()
 
     data = load_combined_data(args.input_dir)
-    df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turn_time = parse_data(data)
+    df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turn_time, df_utopias = parse_data(data)
 
-    run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, args.port)
+    run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, df_utopias, args.port)
 
 
 if __name__ == "__main__":
