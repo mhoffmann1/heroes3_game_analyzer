@@ -28,7 +28,7 @@ python dashboard.py 2024_11_05/ --port 8080
 
 ## Current state
 
-244.GM2 - Reads player resources correct, but uses know offsets instead of dynamic ones. No other save file will work
+Working for single and multiplayer games.
 
 
 ## To do
@@ -36,20 +36,6 @@ python dashboard.py 2024_11_05/ --port 8080
 
 ## issues
 
-Warning: AI Value not found for unit 'Leprechaun'
-
-
 
 ## Ideas
 
-
-Hide number of cities and Utopia information - click to show. Not to spoil fun
-
-Find towns: use fixed town names:
-https://heroes.thelazy.net/index.php/List_of_all_town_names
-
-Stronghest hero (A+D formula)
-
-army units level percentage/numbers
-
-Custom town name exclude Talirindę

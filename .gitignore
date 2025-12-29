@@ -1,3 +1,4 @@
+# Dirs
 h3tools/__pycache__
 h3tools/hero/__pycache__
 h3tools/lib/__pycache__
@@ -7,8 +8,16 @@ games/
 processed_games/
 venv_heroes
 
+# Files
+output_data.json
+output_data_player.json
+hero_stats.json
+combined_data.json
+combined_player_data.json
+
 other
 *.bin
 *.txt
 *.log
 *.GM*
+*.swp
