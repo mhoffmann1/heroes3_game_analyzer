@@ -534,7 +534,7 @@ CREATURES = [
     "Wood Elf",
     "Wraith",
     "Wyvern",
-    "Wyvern Monarch",
+    "Wyvern Monarch",        
 ]
 
 
@@ -1242,6 +1242,9 @@ TOWN_NAMES = [
     "Arcadia", "Ardon", "Aurichalcum", "Burton", "Corakstone", "Darentor",
     "Endurance", "Fort Rotwang", "Kergar", "Mount Copper", "New Dolere", "Prospero",
     "Ridder", "Salda", "Volta", "Vulcan",
+    # Bulwark
+    "Alfheim","Anabar","Borea","Ellesmere","Everwinter","Halsmere","Jotunngard","Ketpall",
+    "Meghion","Stonefang","Thulekh","Tundara","Varand","White Mouth","Windskalir","Winterkill"
     # Custom / campaign names
     "Plinth", "Mirham", "Terraneus", "Trailia", "Caryatid", "Fair Feather",
     "Steadwick", "Kleesive", "Stonecastle", "Avalon", "Welnin", "Defiance",
@@ -1521,6 +1524,20 @@ class Savefile(object):
         0xB7: "Crimson Couatl",
         0xB8: "Dreadnought",
         0xB9: "Juggernaut",
+        0xBA: "Kobold",
+        0xBB: "Kobold Foreman",
+        0xBC: "Mountain Ram",
+        0xBD: "Argali",
+        0xBE: "Snow Elf",
+        0xBF: "Steel Elf",
+        0xC0: "Yeti",
+        0xC1: "Yeti Runemaster",
+        0xC2: "Shaman",
+        0xC3: "Great Shaman",
+        0xC4: "Mammoth",
+        0xC5: "War Mammoth",
+        0xC6: "Jotunn",
+        0xC7: "Jotunn Warlord",
 
         0xFFFFFFFF: "Empty Slot"
     }
@@ -1546,8 +1563,6 @@ class Savefile(object):
         self.maptiles    = []
         self.read(parse_heroes)
         #self.get_map_exploration()
-        
-
 
     def patch(self, bytes, span):
         """Patches unpacked contents with bytes from span[0] to span[1]."""
@@ -1697,7 +1712,7 @@ class Savefile(object):
 
         # Get map exloration info
         map_exploration = self.summarize_tile_visibility_per_player()
-        logger.debug(f"Visibility bitmasks: {self.map_exploration_stats}")
+        #logger.debug(f"Visibility bitmasks: {self.map_exploration_stats}")
         logger.debug(f"Exploration stats: {map_exploration}")
 
         for offset in range(start_offset, end_offset + block_size):
