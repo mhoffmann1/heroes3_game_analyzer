@@ -29,13 +29,13 @@ VERSION_BYTERANGES = {
 
 
 """Hero skills, in file order, added to default skills."""
-SKILLS = ["Interference"]
+SKILLS = ["Interference", "Runes"]
 
 
 """Allowed (min, max) ranges for various hero properties."""
 HERO_RANGES = {
     "level":           ( 0, 74),
-    "skills":          ( 0, 29),
+    "skills":          ( 0, 30),
 }
 
 
@@ -149,6 +149,20 @@ CREATURES = [
     "Storm Elemental",
     "Stormbird",
     "Troll",
+    "Kobold",
+    "Kobold Foreman",
+    "Mountain Ram",
+    "Argali",
+    "Snow Elf",
+    "Steel Elf",
+    "Yeti",
+    "Yeti Runemaster",
+    "Shaman",
+    "Great Shaman",
+    "Mammoth",
+    "War Mammoth",
+    "Jotunn",
+    "Jotunn Warlord",
 ]
 
 
@@ -253,9 +267,24 @@ IDS = {
     "Storm Elemental":                   0x7F,
     "Stormbird":                         0x9F,
     "Troll":                             0x90,
+    "Kobold":                            0xBA,
+    "Kobold Foreman":                    0xBB,
+    "Mountain Ram":                      0xBC,
+    "Argali":                            0xBD,
+    "Snow Elf":                          0xBE,
+    "Steel Elf":                         0xBF,
+    "Yeti":                              0xC0,
+    "Yeti Runemaster":                   0xC1,
+    "Shaman":                            0xC2,
+    "Great Shaman":                      0xC3,
+    "Mammoth":                           0xC4,
+    "War Mammoth":                       0xC5,
+    "Jotunn":                            0xC6,
+    "Jotunn Warlord":                    0xC7,
 
     # Skills
     "Interference":                      0x1C,
+    "Runes":                             0x1D,
 
     # Spells
     "Titan's Lightning Bolt":            0x39,
@@ -356,8 +385,8 @@ HERO_REGEX = re.compile(b"""
 
                              #  13 bytes: hero name, null-padded               138-150
     (?P<name>[^\x00-\x20].{11}\x00)
-    [\x00-\x03]{29}          #  29 bytes: skill levels (Interference last)     151-179
-    .{27}                    #  27 bytes: skill slots (legacy, unused)         180-206
+    [\x00-\x03]{30}          #  29 bytes: skill levels (Runes last)     151-179
+    .{26}                    #  27 bytes: skill slots (legacy, unused)         180-206
     .{4}                     #   4 bytes: primary stats                        207-210
 
     [\x00-\x01]{70}          #  70 bytes: spells in book                       211-280
@@ -379,7 +408,7 @@ HERO_REGEX = re.compile(b"""
     .{10}                    # but HotA appears to encode additional information here.
 
     .{36}                    #  36 bytes: unknown                             1025-1060
-    [\x00-\x1C]{29}          #  29 bytes: skill slots                         1061-1089
+    [\x00-\x1D]{30}          #  30 bytes: skill slots                         1061-1089
 """, re.VERBOSE | re.DOTALL)
 
 

@@ -117,7 +117,7 @@ def parse_game_info(mapdata, towns):
 
     return game_info
 
-def calculate_army_strength(army, attack_skill, defense_skill, ai_values):
+def calculate_army_strength(army, attack_skill, defense_skill, unit_stats):
     """Calculate army strength: sum(AI_Value * count) * H, where H = sqrt((1 + 0.05 * A) * (1 + 0.05 * D))."""
     # Calculate hero strength (H)
     H = math.sqrt((1 + 0.05 * attack_skill) * (1 + 0.05 * defense_skill))
@@ -127,9 +127,10 @@ def calculate_army_strength(army, attack_skill, defense_skill, ai_values):
     for unit in army:
         unit_name = unit.get("name", "")
         unit_count = unit.get("count", 0)
-        ai_value = ai_values.get(unit_name, 0)  # Default to 0 if unit not found
-        if ai_value == 0:
-            logger.warning("AI Value not found for unit '%s'", unit_name)
+        for unit_stat in unit_stats["units"]:
+            if unit_stat["Name"] == unit_name:
+                ai_value = unit_stat.get("AIValue",0)
+                break
         total_ai_value += ai_value * unit_count
     
     # Army strength = total AI Value * H
@@ -192,7 +193,7 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
                 defense_skill = stats.get("defense", 0)
                 
                 # Calculate army stats
-                army_strength = calculate_army_strength(army, attack_skill, defense_skill, ai_values)
+                army_strength = calculate_army_strength(army, attack_skill, defense_skill, unit_stats)
                 army_hitpoints = calculate_army_hitpoints(army, unit_stats)
                 army_levels = calculate_army_levels(army, unit_stats)
                 
@@ -235,7 +236,7 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
 
     #print(f"towns: {towns}")
     for town in towns:
-        town['army_strength'] = calculate_army_strength(town['garrison'], 0, 0, ai_values)
+        town['army_strength'] = calculate_army_strength(town['garrison'], 0, 0, unit_stats)
         town['army_hitpoints'] = calculate_army_hitpoints(town['garrison'], unit_stats)
         town['army_levels'] = calculate_army_levels(town['garrison'], unit_stats)
 
