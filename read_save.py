@@ -221,7 +221,8 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
                     "artifact_spells": list(artifact_spells),
                     "has_dd": spell_known("Dimension Door", spells) or spell_known("Dimension Door", artifact_spells),
                     "has_fly": spell_known("Fly", spells) or spell_known("Fly", artifact_spells),
-                    "has_tp": spell_known("Town Portal", spells) or spell_known("Town Portal", artifact_spells)                
+                    "has_tp": spell_known("Town Portal", spells) or spell_known("Town Portal", artifact_spells),
+                    "coords": hero.coords                
                 }
                 heroes.append(hero_data)
             except AttributeError as e:

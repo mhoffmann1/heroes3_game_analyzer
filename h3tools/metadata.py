@@ -155,13 +155,27 @@ HERO_BYTE_POSITIONS = {
 
 
 """Regulax expression for finding hero struct in savefile bytes."""
+
+# Missing header for each hero:
+
+# .{2}                     #   X coordinate
+# .{2}                     #   Y coordinate
+# .{1}                     #   Z coordinate. 0 - surface, 1 - subterranean
+# .{31}
+# .{9}
+# .{3}                     #   X coordinate of destination marker
+# .{3}                     #   Y coordinate of destination marker
+# .{4}                        
+
+
+
+
 HERO_REGEX = re.compile(b"""
     # There are at least 60 bytes more at front, but those can also include
     # hero biography, making length indeterminate.
     # Bio ends at position -32 from total movement point start.
     # If bio end position is \x00, then bio is empty, otherwise bio extends back
     # until a 4-byte span giving bio length (which always ends with \x00).
-
     .{4}                     #   4 bytes: movement points in total             000-003
     .{4}                     #   4 bytes: movement points remaining            004-007
     .{4}                     #   4 bytes: experience                           008-011
@@ -1962,6 +1976,12 @@ class Savefile(object):
         if not self.heroes: self.populate_heroes()
         for hero in self.heroes: hero.parse()
 
+    def parse_xyz_from_hero_header(self, header: bytes):
+        x1 = int.from_bytes(header[0:2], "big")
+        y1 = int.from_bytes(header[2:4], "big")
+        z  = int.from_bytes(header[4:6], "big")
+        return {"x": x1, "y": y1, "z": z}
+
     def populate_heroes(self):
         heroes = []
         rgx_strip = re.compile(br"^(?!\xFF+\x00+$)([^\x00-\x19]+)\x00+$")
@@ -1978,9 +1998,17 @@ class Savefile(object):
                 hero.set_file_data(blob, len(heroes), (start + pos, end + pos))  # Pass self.raw
                 
                 #print(f"Found hero: {name} at offset: {pos+start-63} to {pos+end}")
+                header = bytearray(self.raw[pos + start-58:pos + start])
+                if hero.name == "Cyra":
+                    print(f"Hero {hero.name} header section\n:{header}")
                 fullblob = bytearray(self.raw[pos + start-63:pos + end])
                 ownership_byte = fullblob[0x20] if len(fullblob) > 0x20 else 255
                 hero.set_owner(ownership_byte)
+                hero.coords = self.parse_xyz_from_hero_header(header)
+
+                if hero.coords["y"] != 65535:
+                    print(f"{hero.name} coords: {hero.coords}")
+
                 #print(f"Ownership byte (0x20): 0x{ownership_byte:02X} ({ownership_byte})")
                 #print(f"Player: {hero.owner}")
                 heroes.append(hero)

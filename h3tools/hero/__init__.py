@@ -339,6 +339,9 @@ class Hero(object):
         ## Owner
         self.owner = None
 
+        ## Coords
+        self.coords = {}
+
         ## All properties in one structure
         self.properties = AttrDict((k, getattr(self, k)) for k in list(PROPERTIES))
         ## Deep copy of initial or saved properties
