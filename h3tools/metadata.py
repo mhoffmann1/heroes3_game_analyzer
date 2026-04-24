@@ -1999,15 +1999,15 @@ class Savefile(object):
                 
                 #print(f"Found hero: {name} at offset: {pos+start-63} to {pos+end}")
                 header = bytearray(self.raw[pos + start-58:pos + start])
-                if hero.name == "Cyra":
-                    print(f"Hero {hero.name} header section\n:{header}")
+                #if hero.name == "Cyra":
+                #    print(f"Hero {hero.name} header section\n:{header}")
                 fullblob = bytearray(self.raw[pos + start-63:pos + end])
                 ownership_byte = fullblob[0x20] if len(fullblob) > 0x20 else 255
                 hero.set_owner(ownership_byte)
                 hero.coords = self.parse_xyz_from_hero_header(header)
 
-                if hero.coords["y"] != 65535:
-                    print(f"{hero.name} coords: {hero.coords}")
+                #if hero.coords["y"] != 65535:
+                #    print(f"{hero.name} coords: {hero.coords}")
 
                 #print(f"Ownership byte (0x20): 0x{ownership_byte:02X} ({ownership_byte})")
                 #print(f"Player: {hero.owner}")
