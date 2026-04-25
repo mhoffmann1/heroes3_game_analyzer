@@ -1,0 +1,1187 @@
+import argparse
+import json
+import logging
+import os
+import re
+
+import dash
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from dash import State, dash_table, dcc, html
+from dash.dependencies import Input, Output
+from plotly.subplots import make_subplots
+
+logger = logging.getLogger(__package__)
+
+
+
+def load_combined_data(directory):
+    combined_path = os.path.join(directory, "combined_player_data.json")
+    if not os.path.isfile(combined_path):
+        raise FileNotFoundError(f"combined_player_data.json not found in {directory}")
+
+    with open(combined_path, "r") as f:
+        data = json.load(f)
+    return data
+
+def parse_data(data):
+    hero_rows = []
+    town_rows = []
+    player_rows = []
+    turn_time = []
+    game_info = None
+    hero_army_levels = []
+    town_army_levels = []
+    # static info for utopia (generated only for 1st turn)
+    # See line 248 in read save to remind yourself why.
+    # This can be done dynamically, but for now it isn't.
+    utopias = {}
+
+    for entry in data:
+        filename = entry.get("filename", "")
+        day = parse_day_from_filename(filename)
+        turn_time.append(entry.get("savetime"))
+
+
+
+        # If game_info is not defined then we are parsing first savefile
+        # This info should be extracted only once
+        if not game_info:
+            game_info = entry.get("game_info", {})
+
+        # Utopias will get uploaded only once - using data from 1st turn
+        if not len(utopias):
+            utopias = entry.get("utopias")
+        
+        # Convert utopias dict into a DataFrame
+        if isinstance(utopias, dict):
+            df_utopias = pd.DataFrame.from_dict(utopias, orient="index")
+        else:
+            df_utopias = pd.DataFrame()
+
+        players = entry.get("players", {})
+        for player_color, player_data in players.items():
+            # Hero data
+            heroes = player_data.get("heroes", {})
+            if isinstance(heroes, list):
+                for hero_data in heroes:
+                    hero_name = hero_data.get("name", "Unknown")
+                    hero = create_hero_entry(hero_name, hero_data, player_color.capitalize(), day)
+                    # Section for collecting hero army level stats
+                    hero_army_levels_entry = {
+                        "Hero": hero_name,
+                        "Owner": player_color.capitalize(),
+                        "Day": day
+                        }
+                    hero_army_levels_entry.update(hero_data.get("army_levels", {}))
+                    hero_army_levels.append(hero_army_levels_entry)
+
+                    if not all(isinstance(val, int) for val in [hero['attack'], hero["defense"],hero["power"],hero["knowledge"]]):
+                        continue
+                    hero_rows.append(hero)
+
+            elif isinstance(heroes, dict):
+                for hero_name, hero_data in heroes.items():
+                    hero = create_hero_entry(hero_name, hero_data, player_color.capitalize(), day)
+
+                    # Section for collecting hero army level stats
+                    hero_army_levels_entry = {
+                        "Hero": hero_name,
+                        "Owner": player_color.capitalize(),
+                        "Day": day
+                        }
+                    hero_army_levels_entry.update(hero_data.get("army_levels", {}))
+                    hero_army_levels.append(hero_army_levels_entry)
+
+                    if not all(isinstance(val, int) for val in [hero['attack'], hero["defense"],hero["power"],hero["knowledge"]]):
+                        logger.debug(f"Detected hero {hero_name} with invalid skill value.")
+                        continue
+                    hero_rows.append(hero)
+
+            towns = player_data.get("towns", {})
+            
+            for town_data in towns:
+                town_name = town_data.get("name", "Unknown")
+                town_army_levels_entry = {
+                    "Town": town_name,
+                    "Owner": player_color.capitalize(),
+                    "Day": day
+                }
+                town_army_levels_entry.update(town_data.get("army_levels", {}))
+                town_army_levels.append(town_army_levels_entry)
+            
+            simplified_towns = [
+                {
+                    "town_name": t.get("name"),
+                    "town_type": t.get("type"),
+                    "coords": t.get("coords")
+                }
+                for t in towns
+            ]
+
+            # Map size:
+            #total_tiles = pow(game_info['map_size'],2)*game_info['levels']
+
+            # Player-level data
+            player_rows.append({
+                "day": day,
+                "player_color": player_color.capitalize(),
+                "gold": player_data.get("resources", {}).get("gold", 0),
+                "wood": player_data.get("resources", {}).get("wood", 0),
+                "ore": player_data.get("resources", {}).get("ore", 0),
+                "mercury": player_data.get("resources", {}).get("mercury", 0),
+                "sulfur": player_data.get("resources", {}).get("sulfur", 0),
+                "crystal": player_data.get("resources", {}).get("crystals", 0),
+                "gems": player_data.get("resources", {}).get("gems", 0),
+                "town_count": player_data.get("town_count", 0),
+                "town_summary": simplified_towns,
+                "visited_utopias": player_data.get("visited_utopias", 0),
+                "total_hero_army_strength": player_data.get("heroes_strength", 0),
+                "total_garrison_army_strength": player_data.get("garrison_strength", 0),
+                "total_army_strength": player_data.get("total_strength", 0),
+                "total_army_hitpoints": player_data.get("total_hitpoints", 0),
+                "tiles_explored": player_data.get("tiles_explored", 0),
+                "fog_of_war": player_data.get("fog_of_war",'')
+            })
+
+    # Create Panda DataFrame from hero army levels
+    df_heroes_army_levels = pd.DataFrame(hero_army_levels).fillna(0)
+    army_cols = [c for c in df_heroes_army_levels if c not in ["Hero", "Owner", "Day"]]
+    df_heroes_army_levels[army_cols] = df_heroes_army_levels[army_cols].fillna(0).astype(int)
+    sorted_cols = ["Hero", "Owner", "Day"] + sorted(army_cols, key=sort_key)
+    df_heroes_army_levels = df_heroes_army_levels[sorted_cols]
+
+    # Create Panda DataFrame from town army levels
+    df_towns_army_levels = pd.DataFrame(town_army_levels).fillna(0)
+    army_cols = [c for c in df_towns_army_levels if c not in ["Town", "Owner", "Day"]]
+    df_towns_army_levels[army_cols] = df_towns_army_levels[army_cols].fillna(0).astype(int)
+    sorted_cols = ["Town", "Owner", "Day"] + sorted(army_cols, key=sort_key)
+    df_towns_army_levels = df_towns_army_levels[sorted_cols]
+
+    df_heroes = pd.DataFrame(hero_rows)
+    df_players = pd.DataFrame(player_rows)
+    df_turntime = pd.DataFrame(turn_time, columns=["turn_time"])
+    df_turntime["turn_time_sec"] = df_turntime["turn_time"].astype(int)
+
+    return df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turntime, df_utopias
+
+def create_hero_entry(hero_name, hero_data, player_color, day):
+    hero = {
+        "day": day,
+        "player_color": player_color,
+        "hero_name": hero_name,
+        "experience": hero_data.get("experience", 0),
+        "army_strength": hero_data.get("army_strength", 0),
+        "army_hitpoints": hero_data.get("army_hitpoints",0),
+        "attack": hero_data.get("primary_skills", {}).get("attack", 0),
+        "defense": hero_data.get("primary_skills", {}).get("defense", 0),
+        "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
+        "knowledge": hero_data.get("primary_skills", {}).get("knowledge", 0),
+        "has_dd": hero_data.get("has_dd", False),
+        "has_fly": hero_data.get("has_fly", False),
+        "has_tp": hero_data.get("has_tp", False),
+        }
+    return hero
+
+def sort_key(col):
+    # Try to extract the leading number
+    match = re.match(r"(\d+)", col)
+    if match:
+        return int(match.group(1)), col  # first by number, then by raw string (so "2" before "2+")
+    return float("inf"), col  # put non-numeric stuff at the end
+
+def parse_day_from_filename(filename):
+    try:
+        basename = os.path.basename(filename).upper()
+        if basename.endswith((".GM1", ".GM2", ".GM3", ".GM4", ".GM5", ".GM6", ".GM7", ".GM8")):
+            name = basename.split(".")[0]  # e.g., "123"
+            if len(name) == 3 and name.isdigit():
+                month = int(name[0])
+                week = int(name[1])
+                day = int(name[2])
+                absolute_day = (month - 1) * 28 + (week - 1) * 7 + day
+                return absolute_day
+    except Exception:
+        pass
+    return None
+
+
+def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, df_utopias, port):
+    app = dash.Dash(__name__)
+    server = app.server
+
+    player_options = sorted(df_heroes["player_color"].dropna().unique())
+    hero_options = sorted(df_heroes["hero_name"].dropna().unique())
+    metric_options = ["experience", "army_strength", "army_hitpoints", "attack", "defense", "power", "knowledge"]
+    player_metric_options = ["gold", "town_count", "total_army_strength", "total_hero_army_strength", 
+                             "total_garrison_army_strength", "total_army_hitpoints", "visited_utopias",
+                             "tiles_explored", "wood", "ore", "mercury", "sulfur", "crystal", "gems"]
+
+    PLAYER_COLORS = {
+        "Red": "#FF0000",
+        "Blue": "#0000FF",
+        "Tan": "#D2B48C",
+        "Green": "#00A000",
+        "Orange": "#FFA500",
+        "Purple": "#800080",
+        "Teal": "#008080",
+        "Pink": "#FF69B4",
+        "None": "#808080",   # Grey for 'None' player
+    }
+
+    PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
+
+    # Add turn index so we know which turn each value belongs to
+    df_turn_time["turn"] = range(1, len(df_turn_time) + 1)
+
+    app.layout = html.Div([
+        html.H1("Heroes 3 Savegame Analyzer Dashboard"),
+
+        # Toggle for Game Info
+        html.Div([
+            dcc.Checklist(
+                id="toggle_game_info",
+                options=[{"label": "Show Game Info", "value": "show"}],
+                value=[],  # Empty by default = hidden
+                style={"marginBottom": "10px"}
+            ),
+            html.Div(
+                id="game_info_container",
+                children=[
+                    html.H3("Game Info"),
+                    dash_table.DataTable(
+                        columns=[{"name": "Key", "id": "Key"}, {"name": "Value", "id": "Value"}],
+                        data=[{"Key": k, "Value": str(v)} for k, v in game_info.items()],
+                        style_table={'width': '50%'},
+                        style_cell={'textAlign': 'left'},
+                    )
+                ],
+                style={"marginBottom": "30px", "display": "none"}  # Hidden by default
+            )
+        ]),
+
+        html.Div([
+            html.H2("Turn Duration Per Turn"),
+            dcc.Graph(id="turn_time_chart", style={'width': '100%'}),
+
+            html.H2("Hero Metrics Over Time"),
+
+            html.Label("Select Players"),
+            dcc.Dropdown(
+                id="player_selector",
+                options=[{"label": p, "value": p} for p in player_options],
+                value=player_options,
+                multi=True
+            ),
+
+            html.Label("Select Heroes"),
+            dcc.Dropdown(
+                id="hero_selector",
+                options=[{"label": h, "value": h} for h in hero_options],
+                value=hero_options,
+                multi=True
+            ),
+
+            html.Label("Select Hero Metrics"),
+            dcc.Dropdown(
+                id="metric_selector",
+                options=[{"label": m.capitalize(), "value": m} for m in metric_options],
+                value=["experience"],
+                multi=True
+            ),
+        ], style={"width": "50%", "marginBottom": "30px"}),
+
+        dcc.Graph(id="line_chart"),
+
+        html.Hr(),
+
+        html.Div([
+            html.H2("Player Metrics Over Time"),
+
+            html.Label("Select Player Metrics"),
+            dcc.Dropdown(
+                id="player_metric_selector",
+                options=[{"label": m.capitalize(), "value": m} for m in player_metric_options],
+                value=["gold"],
+                multi=True
+            ),
+        ], style={"width": "50%", "marginBottom": "30px"}),
+
+        dcc.Graph(id="player_chart"),
+
+        html.Hr(),
+
+        html.H2("Hero Army Levels Comparison"),
+
+        html.Label("Select Heroes"),
+        dcc.Dropdown(
+            id="army_hero_selector",
+            options=[{"label": h, "value": h} for h in hero_options],
+            value=hero_options[:3],  # show first 3 heroes by default
+            multi=True
+        ),
+
+        html.Label("Select Day"),
+        dcc.Slider(
+            id="army_day_slider",
+            min=df_heroes_army_levels["Day"].min(),
+            max=df_heroes_army_levels["Day"].max(),
+            step=1,
+            value=df_heroes_army_levels["Day"].max(),
+            marks={int(day): str(int(day)) for day in sorted(df_heroes_army_levels["Day"].unique())},
+            tooltip={"placement": "bottom", "always_visible": True}
+        ),
+
+        dcc.Graph(id="army_levels_chart"),
+
+        html.H2("Player Army Composition Over Time"),
+        html.Label("Select Players"),
+        dcc.Dropdown(
+            id="player_army_selector",
+            options=[{"label": p, "value": p} for p in PLAYER_ORDER if p in df_players["player_color"].unique()],
+            value=[p for p in PLAYER_ORDER if p in df_players["player_color"].unique() and p != "None"],
+            multi=True
+        ),
+        html.Div([
+            html.Button("Play", id="player_army_play_btn", n_clicks=0),
+            html.Button("Pause", id="player_army_pause_btn", n_clicks=0),
+            dcc.Interval(id="player_army_anim_interval", interval=1000, n_intervals=0, disabled=True)
+        ], style={"margin": "10px 0"}),
+
+        dcc.Slider(
+            id="player_army_day_slider",
+            min=df_heroes_army_levels["Day"].min(),
+            max=df_heroes_army_levels["Day"].max(),
+            step=1,
+            value=df_heroes_army_levels["Day"].min(),
+            marks={int(day): str(int(day)) for day in sorted(df_heroes_army_levels["Day"].unique())},
+            tooltip={"placement": "bottom", "always_visible": True}
+        ),
+
+        dcc.Graph(id="player_army_levels_chart"),
+
+        html.H2("Town Ownership Distribution"),
+
+        html.Label("Select Day"),
+        dcc.Slider(
+            id="day_slider",
+            min=df_players["day"].min(),
+            max=df_players["day"].max(),
+            step=1,
+            value=df_players["day"].max(),
+            marks={int(day): str(int(day)) for day in sorted(df_players["day"].unique())},
+            tooltip={"placement": "bottom", "always_visible": True}
+        ),
+
+        dcc.Graph(id="town_pie_chart"),
+
+        html.H2("Utopia Visitation"),
+
+        html.Label("View Mode"),
+        dcc.RadioItems(
+            id="utopia_view_mode",
+            options=[
+                {"label": "Count", "value": "count"},
+                {"label": "Percentage", "value": "percentage"}
+            ],
+            value="count",
+            labelStyle={"display": "inline-block", "margin-right": "15px"},
+            inputStyle={"margin-right": "5px"}
+        ),
+
+        html.Div([
+            html.Div([
+                dcc.Graph(id="utopia_pie_chart")
+            ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
+
+            html.Div([
+                dcc.Graph(id="utopia_total_chart")
+            ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
+        ]),
+
+        html.H2("Spell Availability Over Time"),
+
+        html.Label("Select Spell:"),
+        dcc.Dropdown(
+            id="spell_selector",
+            options=[
+                {"label": "Dimension Door", "value": "has_dd"},
+                {"label": "Fly", "value": "has_fly"},
+                {"label": "Town Portal", "value": "has_tp"}
+            ],
+            value="has_dd",  # Default to Dimension Door
+            clearable=False
+        ),
+
+        dcc.Graph(id="spell_chart"),
+
+        html.H2("Timeline Heatmap"),
+
+        html.Label("Select Heatmap Metric"),
+        dcc.Dropdown(
+            id="heatmap_metric_selector",
+            options=[{"label": m.capitalize(), "value": m} for m in player_metric_options],
+            value="town_count",
+            clearable=False
+        ),
+
+        dcc.Graph(id="heatmap_chart"),
+
+        html.H2("Fog of War Exploration"),
+
+        html.Label("Select Player"),
+        dcc.Dropdown(
+            id="fog_player_selector",
+            options=[
+                {"label": p, "value": p}
+                for p in PLAYER_ORDER if p in df_players["player_color"].unique()
+            ],
+            value="Red",
+            clearable=False
+        ),
+
+        html.Div([
+            html.Button("Play", id="fog_play_btn", n_clicks=0),
+            html.Button("Pause", id="fog_pause_btn", n_clicks=0),
+            dcc.Interval(id="fog_anim_interval", interval=800, n_intervals=0, disabled=True)
+        ], style={"margin": "10px 0"}),
+
+        dcc.Graph(id="fog_of_war_map"),
+
+        dcc.Slider(
+            id="fog_day_slider",
+            min=df_players["day"].min(),
+            max=df_players["day"].max(),
+            step=1,
+            value=df_players["day"].min(),
+            marks={int(day): str(day) for day in df_players["day"].unique()},
+        ),
+    ])
+
+
+    # Chart specs start here:
+
+    # Column chart
+    @app.callback(
+        Output("turn_time_chart", "figure"),
+        Input("turn_time_chart", "id")
+    )
+    def update_turn_time(_):
+        avg_turn_time = df_turn_time["turn_time_sec"].mean()
+
+        fig = px.bar(
+            df_turn_time,
+            x=df_turn_time.index + 1,
+            y="turn_time_sec",
+            labels={"x": "Turn", "turn_time_sec": "Seconds"},
+            title="Turn Duration (Seconds)"
+        )
+        fig.update_layout(
+            xaxis_title="Turn",
+            yaxis_title="Seconds",
+            bargap=0.2,
+            width=1200,
+            height=500
+        )
+
+        # Add annotation with average
+        fig.add_annotation(
+            x=0.5, y=1.1, xref="paper", yref="paper", showarrow=False,
+            text=f"Average turn time: {avg_turn_time:.1f} sec",
+            font=dict(size=14, color="darkblue")
+        )
+
+        return fig
+
+    @app.callback(
+        Output("game_info_container", "style"),
+        Input("toggle_game_info", "value")
+    )
+    def toggle_game_info(value):
+        if "show" in value:
+            return {"marginBottom": "30px", "display": "block"}
+        return {"marginBottom": "30px", "display": "none"}
+
+    # Update hero selector based on player selection
+    @app.callback(
+        Output("hero_selector", "options"),
+        Output("hero_selector", "value"),
+        Input("player_selector", "value")
+    )
+    def update_hero_selector(selected_players):
+        filtered = df_heroes[df_heroes["player_color"].isin(selected_players)]
+        heroes = sorted(filtered["hero_name"].dropna().unique())
+        options = [{"label": h, "value": h} for h in heroes]
+        return options, heroes
+
+    # Update line chart for heroes
+    @app.callback(
+        Output("line_chart", "figure"),
+        Input("player_selector", "value"),
+        Input("hero_selector", "value"),
+        Input("metric_selector", "value")
+    )
+    def update_chart(selected_players, selected_heroes, selected_metrics):
+        if not selected_players or not selected_heroes or not selected_metrics:
+            return go.Figure()
+
+        filtered = df_heroes[
+            (df_heroes["player_color"].isin(selected_players)) &
+            (df_heroes["hero_name"].isin(selected_heroes))
+        ]
+
+        fig = go.Figure()
+
+        for metric in selected_metrics:
+            for (player, hero), group in filtered.groupby(["player_color", "hero_name"]):
+                fig.add_trace(go.Scatter(
+                    x=group["day"],
+                    y=group[metric],
+                    mode="lines+markers",
+                    name=f"{hero} ({player}) - {metric.capitalize()}"
+                ))
+
+        fig.update_layout(
+            title="Hero Progress Over Time",
+            xaxis_title="Game Day",
+            yaxis_title="Value",
+            hovermode="x unified"
+        )
+        return fig
+
+    # Heroes army level progression
+
+    @app.callback(
+        Output("army_levels_chart", "figure"),
+        [
+            Input("army_hero_selector", "value"),
+            Input("army_day_slider", "value")
+        ]
+    )
+    def update_army_levels(selected_heroes, selected_day):
+        if not selected_heroes:
+            return go.Figure()
+
+        # Filter for chosen day & heroes
+        filtered = df_heroes_army_levels[
+            (df_heroes_army_levels["Day"] == selected_day) &
+            (df_heroes_army_levels["Hero"].isin(selected_heroes))
+        ]
+
+        if filtered.empty:
+            return go.Figure()
+
+        # Sort army level columns numerically
+        army_cols = [c for c in filtered.columns if c not in ["Hero", "Owner", "Day"]]
+        army_cols_sorted = sorted(army_cols, key=lambda x: (int(re.match(r"\d+", x).group()), x))
+
+        # Color mapping
+        level_colors = {
+            "1": "#C0C0C0", "1+": "#808080",
+            "2": "#90EE90", "2+": "#006400",
+            "3": "#87CEFA", "3+": "#00008B",
+            "4": "#FFA500", "4+": "#FF4500",
+            "5": "#9370DB", "5+": "#4B0082",
+            "6": "#FF6347", "6+": "#8B0000",
+            "7": "#2F4F4F", "7+": "#000000"
+        }
+
+        # Build stacked bar chart
+        fig = go.Figure()
+        for col in army_cols_sorted:
+            fig.add_trace(go.Bar(
+                x=filtered["Hero"],
+                y=filtered[col],
+                name=f"Level {col}",
+                marker=dict(color=level_colors.get(col, "#AAAAAA"))  # fallback gray
+            ))
+
+        fig.update_layout(
+            barmode="stack",
+            title=f"Army Composition by Unit Level (Day {selected_day})",
+            xaxis_title="Hero",
+            yaxis_title="Number of Units",
+            legend_title="Unit Level"
+        )
+        return fig
+
+
+
+    # Player-level charts
+
+    @app.callback(
+        Output("player_army_anim_interval", "disabled"),
+        Input("player_army_play_btn", "n_clicks"),
+        Input("player_army_pause_btn", "n_clicks"),
+        prevent_initial_call=True
+    )
+    def toggle_player_army_animation(play_clicks, pause_clicks):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            raise dash.exceptions.PreventUpdate
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        return button_id != "player_army_play_btn"  # Play enables, Pause disables
+        
+    @app.callback(
+        Output("player_army_day_slider", "value"),
+        Input("player_army_anim_interval", "n_intervals"),
+        State("player_army_day_slider", "value"),
+        State("player_army_day_slider", "min"),
+        State("player_army_day_slider", "max"),
+        prevent_initial_call=True
+    )
+    def animate_player_army_days(n_intervals, current_day, min_day, max_day):
+        next_day = current_day + 1
+        if next_day > max_day:
+            return min_day  # loop back
+        return next_day
+
+
+    @app.callback(
+        Output("player_chart", "figure"),
+        Input("player_selector", "value"),
+        Input("player_metric_selector", "value")
+    )
+    def update_player_chart(selected_players, selected_metrics):
+        if not selected_players or not selected_metrics:
+            return go.Figure()
+    
+        filtered = df_players[df_players["player_color"].isin(selected_players)]
+        fig = go.Figure()
+    
+        for metric in selected_metrics:
+            for player in PLAYER_ORDER:
+                if player not in selected_players:
+                    continue
+                group = filtered[filtered["player_color"] == player]
+                if group.empty:
+                    continue
+                
+                color = PLAYER_COLORS.get(player, "#000000")  # fallback to black if not defined
+    
+                fig.add_trace(go.Scatter(
+                    x=group["day"],
+                    y=group[metric],
+                    mode="lines+markers",
+                    name=f"{player} - {metric.capitalize()}",
+                    line=dict(color=color),
+                    marker=dict(color=color)
+                ))
+    
+        fig.update_layout(
+            title="Player Metrics Over Time",
+            xaxis_title="Game Day",
+            yaxis_title="Value",
+            hovermode="x unified",
+            legend=dict(traceorder="normal")  # Keep the order in which traces are added
+        )
+        return fig
+
+    # Pie chart for town ownership (latest day)
+    @app.callback(
+        Output("town_pie_chart", "figure"),
+        Input("player_selector", "value"),
+        Input("day_slider", "value")
+    )
+    def update_town_pie(selected_players, selected_day):
+        if df_players.empty or selected_day is None:
+            return go.Figure()
+
+        current = df_players[df_players["day"] == selected_day]
+        filtered = current[current["player_color"].isin(selected_players)]
+
+        if filtered.empty:
+            return go.Figure()
+
+        fig = px.pie(
+            filtered,
+            names="player_color",
+            values="town_count",
+            title=f"Town Ownership on Day {selected_day}",
+            color="player_color",
+            color_discrete_map=PLAYER_COLORS
+        )
+
+        return fig
+    
+    @app.callback(
+        Output("player_army_levels_chart", "figure"),
+        [
+            Input("player_army_selector", "value"),
+            Input("player_army_day_slider", "value")
+        ]
+    )
+    def update_player_army_levels(selected_players, selected_day):
+        if not selected_players:
+            return go.Figure()
+
+        # Filter to selected day
+        heroes_filtered = df_heroes_army_levels[df_heroes_army_levels["Day"] == selected_day].copy()
+        towns_filtered  = df_towns_army_levels[df_towns_army_levels["Day"] == selected_day].copy()
+
+        # Army columns = union of heroes+towns minus non-army columns
+        exclude_cols = {"Hero", "Town", "Owner", "Day"}
+        army_cols = sorted((set(heroes_filtered.columns) | set(towns_filtered.columns)) - exclude_cols)
+
+        # Ensure both have same army columns
+        for col in army_cols:
+            if col not in heroes_filtered:
+                heroes_filtered[col] = 0
+            if col not in towns_filtered:
+                towns_filtered[col] = 0
+
+        for df in (heroes_filtered, towns_filtered):
+            for col in army_cols:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+
+        # Group by Owner
+        heroes_grouped = heroes_filtered.groupby("Owner", as_index=False)[army_cols].sum()
+        towns_grouped  = towns_filtered.groupby("Owner",  as_index=False)[army_cols].sum()
+
+        # Merge hero + town contributions
+        combined = pd.merge(
+            heroes_grouped, towns_grouped,
+            on="Owner", how="outer", suffixes=("_h", "_t")
+        ).fillna(0)
+
+        # Collapse hero + town into total
+        for col in army_cols:
+            h_col, t_col = f"{col}_h", f"{col}_t"
+            h_vals = pd.to_numeric(combined[h_col], errors="coerce").fillna(0).astype(int) if h_col in combined else 0
+            t_vals = pd.to_numeric(combined[t_col], errors="coerce").fillna(0).astype(int) if t_col in combined else 0
+            combined[col] = h_vals + t_vals
+            combined.drop(columns=[c for c in (h_col, t_col) if c in combined], inplace=True)
+
+        # Filter only selected players
+        combined = combined[combined["Owner"].isin(selected_players)]
+        if combined.empty:
+            return go.Figure()
+
+        # --- Enforce player order ---
+        PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
+        combined["Owner"] = pd.Categorical(combined["Owner"], categories=PLAYER_ORDER, ordered=True)
+        combined = combined.sort_values("Owner")
+
+        # Sort columns: 1, 1+, 2, 2+, ...
+        import re
+        def sort_key(c):
+            m = re.match(r"(\d+)", c)
+            return (int(m.group(1)), "+" in c) if m else (999, c)
+        army_cols_sorted = sorted(army_cols, key=sort_key)
+
+        # --- Build grouped stacked bar chart ---
+        fig = go.Figure()
+
+        for _, row in combined.iterrows():
+            owner = row["Owner"]
+            color = PLAYER_COLORS.get(owner, "#808080")  # default gray
+            fig.add_trace(go.Bar(
+                x=army_cols_sorted,
+                y=[row[col] for col in army_cols_sorted],
+                name=owner,
+                marker=dict(color=color),
+                opacity=0.9
+            ))
+
+        fig.update_layout(
+            barmode="group",  # bars side by side per level, colored by player
+            title=f"Total Army Composition by Player (Day {selected_day})",
+            xaxis_title="Unit Level",
+            yaxis_title="Number of Units",
+            legend_title="Player"
+        )
+
+        return fig
+
+
+    # Spell availability
+    @app.callback(
+        Output("spell_chart", "figure"),
+        Input("player_selector", "value"),
+        Input("spell_selector", "value")
+    )
+    def update_spell_chart(selected_players, selected_spell):
+        if not selected_players or not selected_spell:
+            return go.Figure()
+
+        spell_names = {
+            "has_dd": "Dimension Door",
+            "has_fly": "Fly",
+            "has_tp": "Town Portal"
+        }
+
+        df = df_heroes.copy()
+
+        # Prepare data
+        records = []
+        for day in sorted(df["day"].dropna().unique()):
+            daily = df[df["day"] <= day]
+            for player in selected_players:
+                player_daily = daily[daily["player_color"] == player]
+                has_spell = player_daily[selected_spell].any()
+                records.append({
+                    "day": day,
+                    "player_color": player,
+                    "available": int(has_spell)
+                })
+
+        df_spells = pd.DataFrame(records)
+
+        # Plot
+        fig = go.Figure()
+
+        for player in selected_players:
+            group = df_spells[df_spells["player_color"] == player]
+            if group.empty:
+                continue
+
+            color = PLAYER_COLORS.get(player, "#000000")
+
+            fig.add_trace(go.Scatter(
+                x=group["day"],
+                y=group["available"],
+                mode="lines+markers",
+                name=player,
+                line=dict(shape="hv", color=color),
+                marker=dict(color=color)
+            ))
+
+        fig.update_layout(
+            title=f"{spell_names[selected_spell]} Availability Over Time",
+            xaxis_title="Game Day",
+            yaxis=dict(
+                title="Availability",
+                tickmode="array",
+                tickvals=[0, 1],
+                ticktext=["Not Available", "Available"]
+            ),
+            hovermode="x unified"
+        )
+
+        return fig
+
+    @app.callback(
+        Output("heatmap_chart", "figure"),
+        Input("player_selector", "value"),
+        Input("heatmap_metric_selector", "value")
+    )
+    def update_heatmap(selected_players, selected_metric):
+        if not selected_players or not selected_metric:
+            return go.Figure()
+
+        # Filter data
+        df_filtered = df_players[df_players["player_color"].isin(selected_players)]
+
+        # Pivot data to get a matrix: player_color x day
+        pivot = df_filtered.pivot_table(
+            index="player_color",
+            columns="day",
+            values=selected_metric,
+            fill_value=0
+        ).reindex(PLAYER_ORDER).dropna(how="all")  # Keep color order
+
+        # Create heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=pivot.values,
+            x=pivot.columns,
+            y=pivot.index,
+            colorscale="YlGnBu",
+            hoverongaps=False,
+            colorbar=dict(title=selected_metric.capitalize())
+        ))
+
+        fig.update_layout(
+            title=f"{selected_metric.capitalize()} Timeline Heatmap",
+            xaxis_title="Game Day",
+            yaxis_title="Player",
+            yaxis=dict(autorange="reversed")  # Top = Red
+        )
+
+        return fig
+
+    @app.callback(
+        Output("utopia_pie_chart", "figure"),
+        Input("player_selector", "value"),
+        Input("day_slider", "value"),
+        Input("utopia_view_mode", "value")
+    )
+    def update_utopia_pie(selected_players, selected_day, view_mode):
+        if df_players.empty or selected_day is None:
+            return go.Figure()
+
+        current = df_players[df_players["day"] == selected_day]
+        filtered = current[
+            (current["player_color"] != "None") &
+            (current["player_color"].isin(selected_players))
+        ]
+
+        if filtered.empty:
+            return go.Figure()
+
+        utopia_counts = filtered[["player_color", "visited_utopias"]].groupby("player_color").sum().reset_index()
+
+        total_utopias = game_info.get("total_utopias", 0)
+        if total_utopias == 0:
+            total_utopias = utopia_counts["visited_utopias"].sum()
+
+        if view_mode == "percentage":
+            utopia_counts["value"] = 100 * utopia_counts["visited_utopias"] / total_utopias
+            utopia_counts["label"] = utopia_counts.apply(
+                lambda row: f"{row['player_color']} ({row['value']:.1f}%)", axis=1
+            )
+            title = f"Utopia Visitation by Percentage on Day {selected_day}"
+        else:  # view_mode == "count"
+            utopia_counts["value"] = utopia_counts["visited_utopias"]
+            utopia_counts["label"] = utopia_counts.apply(
+                lambda row: f"{row['player_color']} ({row['visited_utopias']}/{total_utopias})", axis=1
+            )
+            title = f"Utopias Visited on Day {selected_day} (Total: {total_utopias})"
+
+        fig = px.pie(
+            utopia_counts,
+            names="label",
+            values="value",
+            title=title,
+            color="player_color",
+            color_discrete_map=PLAYER_COLORS
+        )
+
+        return fig
+    
+    @app.callback(
+        Output("utopia_total_chart", "figure"),
+        Input("day_slider", "value")
+    )
+    def update_utopia_total_chart(selected_day):
+        if df_players.empty or selected_day is None:
+            return go.Figure()
+
+        # Filter to selected day and ignore 'None'
+        current = df_players[
+            (df_players["day"] == selected_day) &
+            (df_players["player_color"] != "None")
+        ]
+
+        total_utopias = game_info.get("total_utopias", 0)
+        if total_utopias == 0:
+            return go.Figure()
+
+        total_visited = current["visited_utopias"].sum()
+        unvisited = total_utopias - total_visited
+
+        data = pd.DataFrame({
+            "status": ["Visited", "Unvisited"],
+            "count": [total_visited, max(unvisited, 0)]
+        })
+
+        fig = px.pie(
+            data,
+            names="status",
+            values="count",
+            title=f"Total Utopias Visited on Day {selected_day} ({total_visited}/{total_utopias})",
+            color="status",
+            color_discrete_map={
+                "Visited": "#4CAF50",     # Green
+                "Unvisited": "#B0BEC5"    # Grey
+            }
+        )
+
+        return fig
+
+    @app.callback(
+        Output("fog_anim_interval", "disabled"),
+        Input("fog_play_btn", "n_clicks"),
+        Input("fog_pause_btn", "n_clicks"),
+        prevent_initial_call=True
+    )
+    def toggle_animation(play_clicks, pause_clicks):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            raise dash.exceptions.PreventUpdate
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        return button_id != "fog_play_btn"  # Play = False (enabled), Pause = True (disabled)
+
+
+    @app.callback(
+        Output("fog_day_slider", "value"),
+        Input("fog_anim_interval", "n_intervals"),
+        State("fog_day_slider", "value"),
+        State("fog_day_slider", "min"),
+        State("fog_day_slider", "max"),
+        prevent_initial_call=True
+    )
+    def animate_days(n_intervals, current_day, min_day, max_day):
+        next_day = current_day + 1
+        if next_day > max_day:
+            return min_day
+        return next_day
+
+
+    @app.callback(
+        Output("fog_of_war_map", "figure"),
+        Input("fog_player_selector", "value"),
+        Input("fog_day_slider", "value")
+    )
+    def update_fog_map(player_color, selected_day):
+        if not player_color or selected_day is None:
+            return go.Figure()
+
+        row = df_players[
+            (df_players["player_color"] == player_color) &
+            (df_players["day"] == selected_day)
+        ].squeeze()
+
+        #print(f"simplified towns: {row.get('town_summary')}")
+        player_town_list = row.get("town_summary")
+
+        fog = row.get("fog_of_war")
+        if not fog:
+            return go.Figure()
+
+        map_size = game_info.get("map_size", 36)
+        levels = game_info.get("levels", 1)
+
+        tiles_per_level = map_size * map_size
+        level_maps = []
+        for level in range(levels):
+            offset = level * tiles_per_level
+            level_fog = fog[offset:offset + tiles_per_level]
+            grid = np.array([int(c) for c in level_fog]).reshape((map_size, map_size))
+            level_maps.append(grid)
+
+        player_rgb = PLAYER_COLORS.get(player_color, "#999999")
+        marker_color = get_contrasting_color(player_rgb)
+        player_rgb_array = tuple(int(player_rgb.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
+
+        data = []
+        annotations = []
+        x_offset = 0
+        scale_factor = 4  # Bigger images
+
+        for i, level_grid in enumerate(level_maps):
+            rgb_image = np.zeros((map_size, map_size, 3), dtype=np.uint8)
+            for y in range(map_size):
+                for x in range(map_size):
+                    if level_grid[y, x] == 1:
+                        rgb_image[y, x] = player_rgb_array
+                    else:
+                        rgb_image[y, x] = (200, 200, 200)
+
+            # Scale bitmap
+            rgb_image_large = np.repeat(
+                np.repeat(rgb_image, scale_factor, axis=0),
+                scale_factor,
+                axis=1
+            )
+
+            # Add image
+            data.append(go.Image(z=rgb_image_large, x0=x_offset, y0=0))
+
+            # Add Utopia markers for this level (APPEND TO annotations)
+            level_utopias = df_utopias[df_utopias["underground"] == (i == 1)]
+
+            for _, utop in level_utopias.iterrows():
+                ux = utop["X"]
+                uy = utop["Y"]
+
+                # Only mark if explored
+                if level_grid[uy, ux] == 1:
+                    plot_x = x_offset + (ux * scale_factor) + scale_factor / 2
+                    plot_y = (uy * scale_factor) + scale_factor / 2
+
+                    annotations.append(dict(
+                        x=plot_x,
+                        y=plot_y,
+                        text="X",
+                        showarrow=False,
+                        font=dict(size=18, color=marker_color, family="Arial Black"),
+                        xanchor="center",
+                        yanchor="middle"
+                    ))
+
+            #Add town markers for this level ===
+            for town in player_town_list:
+                tx, ty, tlevel_str = town["coords"]
+                tlevel = 0 if tlevel_str == "Surface" else 1
+
+                if tlevel != i:
+                    continue
+                
+                if level_grid[ty, tx] == 1:
+                    plot_x = x_offset + (tx * scale_factor) + scale_factor / 2
+                    plot_y = (ty * scale_factor) + scale_factor / 2
+
+                    annotations.append(dict(
+                        x=plot_x,
+                        y=plot_y,
+                        text="■",
+                        showarrow=False,
+                        font=dict(size=18, color=marker_color, family="Arial Black"),
+                        xanchor="center",
+                        yanchor="middle"
+                    ))
+
+
+            # Add label above image
+            title = "Ground" if i == 0 else "Underground"
+            annotations.append(dict(
+                x=x_offset + rgb_image_large.shape[1] / 2,
+                y=-15,
+                text=title,
+                showarrow=False,
+                font=dict(size=16, color="black"),
+                xanchor="center",
+                yanchor="bottom"
+            ))
+
+            # Move for next level (side-by-side)
+            x_offset += rgb_image_large.shape[1] + 20
+
+        # === Build figure AFTER all annotations collected ===
+        fig = go.Figure(data=data)
+        fig.update_layout(
+            title=f"Fog of War - {player_color} - Day {selected_day}",
+            yaxis=dict(scaleanchor="x", autorange="reversed", visible=False),
+            xaxis=dict(visible=False),
+            annotations=annotations,
+            margin=dict(t=50, l=0, r=0, b=0),
+            width=1000,
+            height=800
+        )
+
+        return fig
+
+
+    app.run(debug=True, port=port)
+
+def get_contrasting_color(hex_color):
+    """Return black or white depending on contrast."""
+    rgb = tuple(int(hex_color.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
+    # Compute luminance
+    luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2])
+    return "white" if luminance < 140 else "black"
+
+def main():
+    parser = argparse.ArgumentParser(description="Heroes 3 Savegame Dashboard")
+    parser.add_argument(
+        "input_dir",
+        help="Directory containing combined_player_data.json"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8050,
+        help="Port to run the dashboard (default: 8050)"
+    )
+    args = parser.parse_args()
+
+    data = load_combined_data(args.input_dir)
+    df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turn_time, df_utopias = parse_data(data)
+
+    run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, df_utopias, args.port)
+
+
+if __name__ == "__main__":
+    main()

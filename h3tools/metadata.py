@@ -1,0 +1,2094 @@
+# -*- coding: utf-8 -*-
+"""
+Constants, data store and savefile functionality.
+
+------------------------------------------------------------------------------
+This file is part of h3tools - Heroes3 Savegame Editor.
+Released under the MIT License.
+
+@created     22.03.2020
+@modified    16.06.2025
+------------------------------------------------------------------------------
+"""
+from collections import defaultdict, OrderedDict
+import contextlib
+import copy
+import datetime
+import gzip
+import logging
+import os
+import re
+import struct
+import sys
+
+import h3tools
+from . import conf
+from . lib import util, utopias
+from . lib.utopias import Utopia
+
+
+
+#logger = logging.getLogger(__package__)
+logger = logging.getLogger('h3_analyzer')
+
+"""Blank value bytes."""
+BLANK = b"\xFF"
+NULL  = b"\x00"
+
+
+"""Index for various byte starts in savefile bytearray."""
+BYTE_POSITIONS = {
+    "version_major":    8,  # Game major version byte
+    "version_minor":   12,  # Game minor version byte
+}
+
+
+"""Hero primary attributes, in file order, as {name: label}."""
+PRIMARY_ATTRIBUTES = OrderedDict([
+    ('attack', 'Attack'),      ('defense',   'Defense'),
+    ('power',  'Spell Power'), ('knowledge', 'Knowledge')
+])
+
+
+"""Hero skills, in file order."""
+SKILLS = [
+    "Pathfinding", "Archery", "Logistics", "Scouting", "Diplomacy", "Navigation",
+    "Leadership", "Wisdom", "Mysticism", "Luck", "Ballistics", "Eagle Eye",
+    "Necromancy", "Estates", "Fire Magic", "Air Magic", "Water Magic",
+    "Earth Magic", "Scholar", "Tactics", "Artillery", "Learning", "Offense",
+    "Armorer", "Intelligence", "Sorcery", "Resistance", "First Aid",
+]
+
+
+"""Hero skill levels, in ascending order."""
+SKILL_LEVELS = ["Basic", "Advanced", "Expert"]
+
+
+"""Slots for hero artifact locations, mapping equivalents like "side1" and "side" to "side"."""
+EQUIPMENT_SLOTS = {"armor": "armor", "cloak": "cloak", "feet": "feet", "helm": "helm",
+                   "lefthand": "hand", "neck": "neck", "righthand": "hand", "shield": "shield",
+                   "side1": "side", "side2": "side", "side3": "side", "side4": "side",
+                   "side5": "side", "weapon": "weapon"}
+
+
+"""Hero primary attribute value range, as (min, max)."""
+PRIMARY_ATTRIBUTE_RANGE = (0, 127)
+
+
+"""Allowed (min, max) ranges for various hero properties."""
+HERO_RANGES = {
+    "attack":          PRIMARY_ATTRIBUTE_RANGE,
+    "defense":         PRIMARY_ATTRIBUTE_RANGE,
+    "power":           PRIMARY_ATTRIBUTE_RANGE,
+    "knowledge":       PRIMARY_ATTRIBUTE_RANGE,
+
+    "exp":             ( 0, 2**32 - 1),
+    "level":           ( 0, 75),
+    "mana_left":       ( 0, 2**16 - 1),
+    "movement_left":   ( 0, 2**32 - 1),
+    "movement_total":  ( 0, 2**32 - 1),
+
+    "army":            ( 0, 7),
+    "army.count":      ( 1, 2**32 - 1),
+    "inventory":       ( 0, 64),
+    "skills":          ( 0, 28),
+}
+
+
+"""Index for byte start of various attributes in hero bytearray."""
+HERO_BYTE_POSITIONS = {
+    "movement_total":     0, # Movement points in total
+    "movement_left":      4, # Movement points remaining
+
+    "exp":                8, # Experience points
+    "mana_left":         16, # Spell points remaining
+    "level":             18, # Hero level
+
+    "skills_count":      12, # Skills count
+    "skills_level":     151, # Skill levels
+    "skills_slot":      179, # Skill slots
+
+    "army_types":        82, # Creature type IDs
+    "army_counts":      110, # Creature counts
+
+    "spells_book":      211, # Spells in book
+    "spells_available": 281, # All spells available for casting
+
+    "attack":           207, # Primary attribute: Attack
+    "defense":          208, # Primary attribute: Defense
+    "power":            209, # Primary attribute: Spell Power
+    "knowledge":        210, # Primary attribute: Knowledge
+
+    "helm":             351, # Helm slot
+    "cloak":            359, # Cloak slot
+    "neck":             367, # Neck slot
+    "weapon":           375, # Weapon slot
+    "shield":           383, # Shield slot
+    "armor":            391, # Armor slot
+    "lefthand":         399, # Left hand slot
+    "righthand":        407, # Right hand slot
+    "feet":             415, # Feet slot
+    "side1":            423, # Side slot 1
+    "side2":            431, # Side slot 2
+    "side3":            439, # Side slot 3
+    "side4":            447, # Side slot 4
+    "ballista":         455, # Ballista slot
+    "ammo":             463, # Ammo Cart slot
+    "tent":             471, # First Aid Tent slot
+    "catapult":         479, # Catapult slot
+    "spellbook":        487, # Spellbook slot
+    "side5":            495, # Side slot 5
+    "inventory":        503, # Inventory start
+
+    "reserved": {            # Slots reserved by combination artifacts
+        "helm":        1016,
+        "cloak":       1017,
+        "neck":        1018,
+        "weapon":      1019,
+        "shield":      1020,
+        "armor":       1021,
+        "hand":        1022, # For both left and right hand, \x00-\x02
+        "feet":        1023,
+        "side":        1024, # For all side slots, \x00-\x05
+    },
+}
+
+
+"""Regulax expression for finding hero struct in savefile bytes."""
+HERO_REGEX = re.compile(b"""
+    # There are at least 60 bytes more at front, but those can also include
+    # hero biography, making length indeterminate.
+    # Bio ends at position -32 from total movement point start.
+    # If bio end position is \x00, then bio is empty, otherwise bio extends back
+    # until a 4-byte span giving bio length (which always ends with \x00).
+
+    .{4}                     #   4 bytes: movement points in total             000-003
+    .{4}                     #   4 bytes: movement points remaining            004-007
+    .{4}                     #   4 bytes: experience                           008-011
+    [\x00-\x1C][\x00]{3}     #   4 bytes: skill slots used                     012-015
+    .{2}                     #   2 bytes: spell points remaining               016-017
+    .{1}                     #   1 byte:  hero level                           018-018
+
+    .{63}                    #  63 bytes: unknown                              019-081
+
+    .{28}                    #  28 bytes: 7 4-byte creature IDs                082-109
+    .{28}                    #  28 bytes: 7 4-byte creature counts             110-137
+
+                             #  13 bytes: hero name, null-padded               138-150
+    (?P<name>[^\x00-\x20].{11}\x00)
+    [\x00-\x03]{28}          #  28 bytes: skill levels                         151-178
+    [\x00-\x1C]{28}          #  28 bytes: skill slots                          179-206
+    .{4}                     #   4 bytes: primary stats                        207-210
+
+    [\x00-\x01]{70}          #  70 bytes: spells in book                       211-280
+    [\x00-\x01]{70}          #  70 bytes: spells available                     281-350
+
+                             # 152 bytes: 19 8-byte equipments worn            351-502
+                             # Blank spots:   FF FF FF FF XY XY XY XY
+                             # Artifacts:     XY 00 00 00 FF FF FF FF
+                             # Scrolls:       XY 00 00 00 00 00 00 00
+                             # Catapult etc:  XY 00 00 00 XY XY 00 00
+    (?P<equipment>(          # Catapult etc:  XY 00 00 00 XY XY 00 00
+      (\xFF{4} .{4}) | (.\x00{3} (\x00{4} | \xFF{4})) | (.\x00{3}.{2}\x00{2})
+    ){19})
+
+                             # 512 bytes: 64 8-byte artifacts in inventory     503-1014
+    ( ((.\x00{3}) | \xFF{4}){2} ){64}
+
+                             # 10 bytes: slots taken by combination artifacts 1015-1024
+    .[\x00-\x01]{6}[\x00-\x02][\x00-\x01][\x00-\x05]
+""", re.VERBOSE | re.DOTALL)
+
+
+"""Hero levels mapped to minimum experience points required."""
+EXPERIENCE_LEVELS = {
+     1:          0,
+     2:       1000,
+     3:       2000,
+     4:       3200,
+     5:       4600,
+     6:       6200,
+     7:       8000,
+     8:      10000,
+     9:      12200,
+    10:      14700,
+    11:      17500,
+    12:      20600,
+    13:      24320,
+    14:      28784,
+    15:      34140,
+    16:      40567,
+    17:      48279,
+    18:      57533,
+    19:      68637,
+    20:      81961,
+    21:      97949,
+    22:     117134,
+    23:     140156,
+    24:     167782,
+    25:     200933,
+    26:     240714,
+    27:     288451,
+    28:     345735,
+    29:     414475,
+    30:     496963,
+    31:     595948,
+    32:     714730,
+    33:     857268,
+    34:    1028313,
+    35:    1233567,
+    36:    1479871,
+    37:    1775435,
+    38:    2130111,
+    39:    2555722,
+    40:    3066455,
+    41:    3679334,
+    42:    4414788,
+    43:    5297332,
+    44:    6356384,
+    45:    7627246,
+    46:    9152280,
+    47:   10982320,
+    48:   13178368,
+    49:   15813625,
+    50:   18975933,
+    51:   22770702,
+    52:   27324424,
+    53:   32788890,
+    54:   39346249,
+    55:   47215079,
+    56:   56657675,
+    57:   67988790,
+    58:   81586128,
+    59:   97902933,
+    60:  117483099,
+    61:  140979298,
+    62:  169174736,
+    63:  203009261,
+    64:  243610691,
+    65:  292332407,
+    66:  350798466,
+    67:  420957736,
+    68:  505148860,
+    69:  606178208,
+    70:  727413425,
+    71:  872895685,
+    72: 1047474397,
+    73: 1256968851,
+    74: 1508362195,
+    75: 1810034207,
+}
+
+
+"""Hero artifacts, for wearing and side slots, excluding spell scrolls."""
+ARTIFACTS = [
+    "Ambassador's Sash",
+    "Amulet of the Undertaker",
+    "Angel Feather Arrows",
+    "Angel Wings",
+    "Armor of Wonder",
+    "Arms of Legion",
+    "Badge of Courage",
+    "Bird of Perception",
+    "Blackshard of the Dead Knight",
+    "Boots of Levitation",
+    "Boots of Polarity",
+    "Boots of Speed",
+    "Bow of Elven Cherrywood",
+    "Bowstring of the Unicorn's Mane",
+    "Breastplate of Brimstone",
+    "Breastplate of Petrified Wood",
+    "Buckler of the Gnoll King",
+    "Cape of Conjuring",
+    "Cape of Velocity",
+    "Cards of Prophecy",
+    "Celestial Necklace of Bliss",
+    "Centaur's Axe",
+    "Charm of Mana",
+    "Clover of Fortune",
+    "Collar of Conjuring",
+    "Crest of Valor",
+    "Crown of Dragontooth",
+    "Crown of the Supreme Magi",
+    "Dead Man's Boots",
+    "Diplomat's Ring",
+    "Dragon Scale Armor",
+    "Dragon Scale Shield",
+    "Dragon Wing Tabard",
+    "Dragonbone Greaves",
+    "Emblem of Cognizance",
+    "Endless Bag of Gold",
+    "Endless Purse of Gold",
+    "Endless Sack of Gold",
+    "Equestrian's Gloves",
+    "Everflowing Crystal Cloak",
+    "Everpouring Vial of Mercury",
+    "Eversmoking Ring of Sulfur",
+    "Garniture of Interference",
+    "Glyph of Gallantry",
+    "Golden Bow",
+    "Greater Gnoll's Flail",
+    "Head of Legion",
+    "Hellstorm Helmet",
+    "Helm of Chaos",
+    "Helm of Heavenly Enlightenment",
+    "Helm of the Alabaster Unicorn",
+    "Hourglass of the Evil Hour",
+    "Inexhaustible Cart of Lumber",
+    "Inexhaustible Cart of Ore",
+    "Ladybird of Luck",
+    "Legs of Legion",
+    "Lion's Shield of Courage",
+    "Loins of Legion",
+    "Mystic Orb of Mana",
+    "Necklace of Dragonteeth",
+    "Necklace of Ocean Guidance",
+    "Necklace of Swiftness",
+    "Ogre's Club of Havoc",
+    "Orb of Driving Rain",
+    "Orb of the Firmament",
+    "Orb of Inhibition",
+    "Orb of Silt",
+    "Orb of Tempestuous Fire",
+    "Orb of Vulnerability",
+    "Pendant of Courage",
+    "Pendant of Death",
+    "Pendant of Dispassion",
+    "Pendant of Free Will",
+    "Pendant of Holiness",
+    "Pendant of Life",
+    "Pendant of Negativity",
+    "Pendant of Second Sight",
+    "Pendant of Total Recall",
+    "Quiet Eye of the Dragon",
+    "Recanter's Cloak",
+    "Red Dragon Flame Tongue",
+    "Rib Cage",
+    "Ring of Conjuring",
+    "Ring of Infinite Gems",
+    "Ring of Life",
+    "Ring of the Wayfarer",
+    "Ring of Vitality",
+    "Sandals of the Saint",
+    "Scales of the Greater Basilisk",
+    "Sea Captain's Hat",
+    "Sentinel's Shield",
+    "Shackles of War",
+    "Shield of the Damned",
+    "Shield of the Dwarven Lords",
+    "Shield of the Yawning Dead",
+    "Skull Helmet",
+    "Speculum",
+    "Spellbinder's Hat",
+    "Sphere of Permanence",
+    "Spirit of Oppression",
+    "Spyglass",
+    "Statesman's Medal",
+    "Still Eye of the Dragon",
+    "Stoic Watchman",
+    "Surcoat of Counterpoise",
+    "Sword of Hellfire",
+    "Sword of Judgement",
+    "Talisman of Mana",
+    "Targ of the Rampaging Ogre",
+    "Thunder Helmet",
+    "Titan's Cuirass",
+    "Titan's Gladius",
+    "Tome of Air",
+    "Tome of Earth",
+    "Tome of Fire",
+    "Tome of Water",
+    "Torso of Legion",
+    "Tunic of the Cyclops King",
+    "Vampire's Cowl",
+    "Vial of Lifeblood",
+]
+
+
+"""Special artifacts like Ballista."""
+SPECIAL_ARTIFACTS = [
+    "Ammo Cart",
+    "Ballista",
+    "Catapult",
+    "First Aid Tent",
+    "Spellbook",
+]
+
+
+"""Creatures for hero army slots."""
+CREATURES = [
+    "Air Elemental",
+    "Ancient Behemoth",
+    "Angel",
+    "Arch Devil",
+    "Arch Mage",
+    "Archangel",
+    "Archer",
+    "Basilisk",
+    "Battle Dwarf",
+    "Behemoth",
+    "Beholder",
+    "Black Dragon",
+    "Black Knight",
+    "Bone Dragon",
+    "Cavalier",
+    "Centaur",
+    "Centaur Captain",
+    "Cerberus",
+    "Champion",
+    "Chaos Hydra",
+    "Crusader",
+    "Cyclops",
+    "Cyclops King",
+    "Demon",
+    "Dread Knight",
+    "Dendroid Guard",
+    "Dendroid Soldier",
+    "Devil",
+    "Diamond Golem",
+    "Dragon Fly",
+    "Dwarf",
+    "Earth Elemental",
+    "Efreeti",
+    "Efreet Sultan",
+    "Evil Eye",
+    "Familiar",
+    "Fire Elemental",
+    "Genie",
+    "Ghost Dragon",
+    "Giant",
+    "Gnoll",
+    "Gnoll Marauder",
+    "Goblin",
+    "Gog",
+    "Gold Dragon",
+    "Gold Golem",
+    "Gorgon",
+    "Grand Elf",
+    "Greater Basilisk",
+    "Green Dragon",
+    "Gremlin",
+    "Griffin",
+    "Halberdier",
+    "Harpy",
+    "Harpy Hag",
+    "Hell Hound",
+    "Hobgoblin",
+    "Horned Demon",
+    "Hydra",
+    "Imp",
+    "Infernal Troglodyte",
+    "Iron Golem",
+    "Lich",
+    "Lizard Warrior",
+    "Lizardman",
+    "Mage",
+    "Magog",
+    "Manticore",
+    "Marksman",
+    "Master Genie",
+    "Master Gremlin",
+    "Medusa",
+    "Medusa Queen",
+    "Mighty Gorgon",
+    "Minotaur",
+    "Minotaur King",
+    "Monk",
+    "Naga",
+    "Naga Queen",
+    "Obsidian Gargoyle",
+    "Ogre",
+    "Ogre Mage",
+    "Orc",
+    "Orc Chieftain",
+    "Pegasus",
+    "Pikeman",
+    "Pit Fiend",
+    "Pit Lord",
+    "Power Lich",
+    "Red Dragon",
+    "Roc",
+    "Royal Griffin",
+    "Scorpicore",
+    "Serpent Fly",
+    "Silver Pegasus",
+    "Skeleton",
+    "Skeleton Warrior",
+    "Stone Gargoyle",
+    "Stone Golem",
+    "Swordsman",
+    "Zealot",
+    "Zombie",
+    "Thunderbird",
+    "Titan",
+    "Troglodyte",
+    "Unicorn",
+    "Walking Dead",
+    "Vampire",
+    "Vampire Lord",
+    "War Unicorn",
+    "Water Elemental",
+    "Wight",
+    "Wolf Raider",
+    "Wolf Rider",
+    "Wood Elf",
+    "Wraith",
+    "Wyvern",
+    "Wyvern Monarch",        
+]
+
+
+"""Spells for hero to cast."""
+SPELLS = [
+    "Air Shield",
+    "Animate Dead",
+    "Anti-Magic",
+    "Armageddon",
+    "Berserk",
+    "Bless",
+    "Blind",
+    "Bloodlust",
+    "Chain Lightning",
+    "Clone",
+    "Counterstrike",
+    "Cure",
+    "Curse",
+    "Death Ripple",
+    "Destroy Undead",
+    "Dimension Door",
+    "Disguise",
+    "Dispel",
+    "Disrupting Ray",
+    "Earthquake",
+    "Fire Shield",
+    "Fire Wall",
+    "Fireball",
+    "Fly",
+    "Force Field",
+    "Forgetfulness",
+    "Fortune",
+    "Frenzy",
+    "Frost Ring",
+    "Haste",
+    "Hypnotize",
+    "Ice Bolt",
+    "Implosion",
+    "Inferno",
+    "Land Mine",
+    "Lightning Bolt",
+    "Magic Arrow",
+    "Magic Mirror",
+    "Meteor Shower",
+    "Mirth",
+    "Misfortune",
+    "Prayer",
+    "Precision",
+    "Protection from Air",
+    "Protection from Earth",
+    "Protection from Fire",
+    "Protection from Water",
+    "Quicksand",
+    "Remove Obstacle",
+    "Resurrection",
+    "Sacrifice",
+    "Scuttle Boat",
+    "Shield",
+    "Slayer",
+    "Slow",
+    "Sorrow",
+    "Stone Skin",
+    "Summon Air Elemental",
+    "Summon Boat",
+    "Summon Earth Elemental",
+    "Summon Fire Elemental",
+    "Summon Water Elemental",
+    "Teleport",
+    "Town Portal",
+    "Water Walk",
+    "Weakness",
+    "View Air",
+    "View Earth",
+    "Visions",
+]
+
+
+"""IDs of all items in savefile."""
+IDS = {
+    # Artifacts
+    "Ambassador's Sash":                 0x44,
+    "Amulet of the Undertaker":          0x36,
+    "Angel Feather Arrows":              0x3E,
+    "Angel Wings":                       0x48,
+    "Armor of Wonder":                   0x1F,
+    "Arms of Legion":                    0x79,
+    "Badge of Courage":                  0x31,
+    "Bird of Perception":                0x3F,
+    "Blackshard of the Dead Knight":     0x08,
+    "Boots of Levitation":               0x5A,
+    "Boots of Polarity":                 0x3B,
+    "Boots of Speed":                    0x62,
+    "Bow of Elven Cherrywood":           0x3C,
+    "Bowstring of the Unicorn's Mane":   0x3D,
+    "Breastplate of Brimstone":          0x1D,
+    "Breastplate of Petrified Wood":     0x19,
+    "Buckler of the Gnoll King":         0x0F,
+    "Cape of Conjuring":                 0x4E,
+    "Cape of Velocity":                  0x63,
+    "Cards of Prophecy":                 0x2F,
+    "Celestial Necklace of Bliss":       0x21,
+    "Centaur's Axe":                     0x07,
+    "Charm of Mana":                     0x49,
+    "Clover of Fortune":                 0x2E,
+    "Collar of Conjuring":               0x4C,
+    "Crest of Valor":                    0x32,
+    "Crown of Dragontooth":              0x2C,
+    "Crown of the Supreme Magi":         0x16,
+    "Dead Man's Boots":                  0x38,
+    "Diplomat's Ring":                   0x43,
+    "Dragon Scale Armor":                0x28,
+    "Dragon Scale Shield":               0x27,
+    "Dragon Wing Tabard":                0x2A,
+    "Dragonbone Greaves":                0x29,
+    "Emblem of Cognizance":              0x41,
+    "Endless Bag of Gold":               0x74,
+    "Endless Purse of Gold":             0x75,
+    "Endless Sack of Gold":              0x73,
+    "Equestrian's Gloves":               0x46,
+    "Everflowing Crystal Cloak":         0x6D,
+    "Everpouring Vial of Mercury":       0x6F,
+    "Eversmoking Ring of Sulfur":        0x71,
+    "Garniture of Interference":         0x39,
+    "Glyph of Gallantry":                0x33,
+    "Golden Bow":                        0x5B,
+    "Greater Gnoll's Flail":             0x09,
+    "Head of Legion":                    0x7A,
+    "Hellstorm Helmet":                  0x17,
+    "Helm of Chaos":                     0x15,
+    "Helm of Heavenly Enlightenment":    0x24,
+    "Helm of the Alabaster Unicorn":     0x13,
+    "Hourglass of the Evil Hour":        0x55,
+    "Inexhaustible Cart of Lumber":      0x72,
+    "Inexhaustible Cart of Ore":         0x70,
+    "Ladybird of Luck":                  0x30,
+    "Legs of Legion":                    0x76,
+    "Lion's Shield of Courage":          0x22,
+    "Loins of Legion":                   0x77,
+    "Mystic Orb of Mana":                0x4B,
+    "Necklace of Dragonteeth":           0x2B,
+    "Necklace of Ocean Guidance":        0x47,
+    "Necklace of Swiftness":             0x61,
+    "Ogre's Club of Havoc":              0x0A,
+    "Orb of Driving Rain":               0x52,
+    "Orb of the Firmament":              0x4F,
+    "Orb of Inhibition":                 0x7E,
+    "Orb of Silt":                       0x50,
+    "Orb of Tempestuous Fire":           0x51,
+    "Orb of Vulnerability":              0x5D,
+    "Pendant of Courage":                0x6C,
+    "Pendant of Death":                  0x68,
+    "Pendant of Dispassion":             0x64,
+    "Pendant of Free Will":              0x69,
+    "Pendant of Holiness":               0x66,
+    "Pendant of Life":                   0x67,
+    "Pendant of Negativity":             0x6A,
+    "Pendant of Second Sight":           0x65,
+    "Pendant of Total Recall":           0x6B,
+    "Quiet Eye of the Dragon":           0x25,
+    "Recanter's Cloak":                  0x53,
+    "Red Dragon Flame Tongue":           0x26,
+    "Rib Cage":                          0x1A,
+    "Ring of Conjuring":                 0x4D,
+    "Ring of Infinite Gems":             0x6E,
+    "Ring of Life":                      0x5F,
+    "Ring of the Wayfarer":              0x45,
+    "Ring of Vitality":                  0x5E,
+    "Sandals of the Saint":              0x20,
+    "Scales of the Greater Basilisk":    0x1B,
+    "Sea Captain's Hat":                 0x7B,
+    "Sentinel's Shield":                 0x12,
+    "Shackles of War":                   0x7D,
+    "Shield of the Damned":              0x11,
+    "Shield of the Dwarven Lords":       0x0D,
+    "Shield of the Yawning Dead":        0x0E,
+    "Skull Helmet":                      0x14,
+    "Speculum":                          0x34,
+    "Spellbinder's Hat":                 0x7C,
+    "Sphere of Permanence":              0x5C,
+    "Spirit of Oppression":              0x54,
+    "Spyglass":                          0x35,
+    "Statesman's Medal":                 0x42,
+    "Still Eye of the Dragon":           0x2D,
+    "Stoic Watchman":                    0x40,
+    "Surcoat of Counterpoise":           0x3A,
+    "Sword of Hellfire":                 0x0B,
+    "Sword of Judgement":                0x23,
+    "Talisman of Mana":                  0x4A,
+    "Targ of the Rampaging Ogre":        0x10,
+    "Thunder Helmet":                    0x18,
+    "Titan's Cuirass":                   0x1E,
+    "Titan's Gladius":                   0x0C,
+    "Tome of Air":                       0x57,
+    "Tome of Earth":                     0x59,
+    "Tome of Fire":                      0x56,
+    "Tome of Water":                     0x58,
+    "Torso of Legion":                   0x78,
+    "Tunic of the Cyclops King":         0x1C,
+    "Vampire's Cowl":                    0x37,
+    "Vial of Lifeblood":                 0x60,
+
+    # Special artifacts
+    "Ammo Cart":                         0x05,
+    "Ballista":                          0x04,
+    "Catapult":                          0x03,
+    "First Aid Tent":                    0x06,
+    "Spell Scroll":                      0x01,
+    "Spellbook":                         0x00,
+    "The Grail":                         0x02,
+
+    # Creatures
+    "Air Elemental":                     0x70,
+    "Ancient Behemoth":                  0x61,
+    "Angel":                             0x0C,
+    "Arch Devil":                        0x37,
+    "Arch Mage":                         0x23,
+    "Archangel":                         0x0D,
+    "Archer":                            0x02,
+    "Basilisk":                          0x6A,
+    "Battle Dwarf":                      0x11,
+    "Behemoth":                          0x60,
+    "Beholder":                          0x4A,
+    "Black Dragon":                      0x53,
+    "Black Knight":                      0x42,
+    "Bone Dragon":                       0x44,
+    "Cavalier":                          0x0A,
+    "Centaur":                           0x0E,
+    "Centaur Captain":                   0x0F,
+    "Cerberus":                          0x2F,
+    "Champion":                          0x0B,
+    "Chaos Hydra":                       0x6F,
+    "Crusader":                          0x07,
+    "Cyclops":                           0x5E,
+    "Cyclops King":                      0x5F,
+    "Demon":                             0x30,
+    "Dread Knight":                      0x43,
+    "Dendroid Guard":                    0x16,
+    "Dendroid Soldier":                  0x17,
+    "Devil":                             0x36,
+    "Diamond Golem":                     0x75,
+    "Dragon Fly":                        0x69,
+    "Dwarf":                             0x10,
+    "Earth Elemental":                   0x71,
+    "Efreeti":                           0x34,
+    "Efreet Sultan":                     0x35,
+    "Evil Eye":                          0x4B,
+    "Familiar":                          0x2B,
+    "Fire Elemental":                    0x72,
+    "Genie":                             0x24,
+    "Ghost Dragon":                      0x45,
+    "Giant":                             0x28,
+    "Gnoll":                             0x62,
+    "Gnoll Marauder":                    0x63,
+    "Goblin":                            0x54,
+    "Gog":                               0x2C,
+    "Gold Dragon":                       0x1B,
+    "Gold Golem":                        0x74,
+    "Gorgon":                            0x66,
+    "Grand Elf":                         0x13,
+    "Greater Basilisk":                  0x6B,
+    "Green Dragon":                      0x1A,
+    "Gremlin":                           0x1C,
+    "Griffin":                           0x04,
+    "Halberdier":                        0x01,
+    "Harpy":                             0x48,
+    "Harpy Hag":                         0x49,
+    "Hell Hound":                        0x2E,
+    "Hobgoblin":                         0x55,
+    "Horned Demon":                      0x31,
+    "Hydra":                             0x6E,
+    "Imp":                               0x2A,
+    "Infernal Troglodyte":               0x47,
+    "Iron Golem":                        0x21,
+    "Lich":                              0x40,
+    "Lizard Warrior":                    0x65,
+    "Lizardman":                         0x64,
+    "Mage":                              0x22,
+    "Magog":                             0x2D,
+    "Manticore":                         0x50,
+    "Marksman":                          0x03,
+    "Master Genie":                      0x25,
+    "Master Gremlin":                    0x1D,
+    "Medusa":                            0x4C,
+    "Medusa Queen":                      0x4D,
+    "Mighty Gorgon":                     0x67,
+    "Minotaur":                          0x4E,
+    "Minotaur King":                     0x4F,
+    "Monk":                              0x08,
+    "Naga":                              0x26,
+    "Naga Queen":                        0x27,
+    "Obsidian Gargoyle":                 0x1F,
+    "Ogre":                              0x5A,
+    "Ogre Mage":                         0x5B,
+    "Orc":                               0x58,
+    "Orc Chieftain":                     0x59,
+    "Pegasus":                           0x14,
+    "Pikeman":                           0x00,
+    "Pit Fiend":                         0x32,
+    "Pit Lord":                          0x33,
+    "Power Lich":                        0x41,
+    "Red Dragon":                        0x52,
+    "Roc":                               0x5C,
+    "Royal Griffin":                     0x05,
+    "Scorpicore":                        0x51,
+    "Serpent Fly":                       0x68,
+    "Silver Pegasus":                    0x15,
+    "Skeleton":                          0x38,
+    "Skeleton Warrior":                  0x39,
+    "Stone Gargoyle":                    0x1E,
+    "Stone Golem":                       0x20,
+    "Swordsman":                         0x06,
+    "Zealot":                            0x09,
+    "Zombie":                            0x3B,
+    "Thunderbird":                       0x5D,
+    "Titan":                             0x29,
+    "Troglodyte":                        0x46,
+    "Unicorn":                           0x18,
+    "Walking Dead":                      0x3A,
+    "Vampire":                           0x3E,
+    "Vampire Lord":                      0x3F,
+    "War Unicorn":                       0x19,
+    "Water Elemental":                   0x73,
+    "Wight":                             0x3C,
+    "Wolf Raider":                       0x57,
+    "Wolf Rider":                        0x56,
+    "Wood Elf":                          0x12,
+    "Wraith":                            0x3D,
+    "Wyvern":                            0x6C,
+    "Wyvern Monarch":                    0x6D,
+
+    # Skills
+    "Air Magic":                         0x0F,
+    "Archery":                           0x01,
+    "Armorer":                           0x17,
+    "Artillery":                         0x14,
+    "Ballistics":                        0x0A,
+    "Diplomacy":                         0x04,
+    "Eagle Eye":                         0x0B,
+    "Earth Magic":                       0x11,
+    "Estates":                           0x0D,
+    "Fire Magic":                        0x0E,
+    "First Aid":                         0x1B,
+    "Intelligence":                      0x18,
+    "Leadership":                        0x06,
+    "Learning":                          0x15,
+    "Logistics":                         0x02,
+    "Luck":                              0x09,
+    "Mysticism":                         0x08,
+    "Navigation":                        0x05,
+    "Necromancy":                        0x0C,
+    "Offense":                           0x16,
+    "Pathfinding":                       0x00,
+    "Resistance":                        0x1A,
+    "Scholar":                           0x12,
+    "Scouting":                          0x03,
+    "Sorcery":                           0x19,
+    "Tactics":                           0x13,
+    "Water Magic":                       0x10,
+    "Wisdom":                            0x07,
+
+    # Skill levels
+    "Basic":                             0x01,
+    "Advanced":                          0x02,
+    "Expert":                            0x03,
+
+    # Spells
+    "Air Shield":                        0x1C,
+    "Animate Dead":                      0x27,
+    "Anti-Magic":                        0x22,
+    "Armageddon":                        0x1A,
+    "Berserk":                           0x3B,
+    "Bless":                             0x29,
+    "Blind":                             0x3E,
+    "Bloodlust":                         0x2B,
+    "Chain Lightning":                   0x13,
+    "Clone":                             0x41,
+    "Counterstrike":                     0x3A,
+    "Cure":                              0x25,
+    "Curse":                             0x2A,
+    "Death Ripple":                      0x18,
+    "Destroy Undead":                    0x19,
+    "Dimension Door":                    0x08,
+    "Disguise":                          0x04,
+    "Dispel":                            0x23,
+    "Disrupting Ray":                    0x2F,
+    "Earthquake":                        0x0E,
+    "Fire Shield":                       0x1D,
+    "Fire Wall":                         0x0D,
+    "Fireball":                          0x15,
+    "Fly":                               0x06,
+    "Force Field":                       0x0C,
+    "Forgetfulness":                     0x3D,
+    "Fortune":                           0x33,
+    "Frenzy":                            0x38,
+    "Frost Ring":                        0x14,
+    "Haste":                             0x35,
+    "Hypnotize":                         0x3C,
+    "Ice Bolt":                          0x10,
+    "Implosion":                         0x12,
+    "Inferno":                           0x16,
+    "Land Mine":                         0x0B,
+    "Lightning Bolt":                    0x11,
+    "Magic Arrow":                       0x0F,
+    "Magic Mirror":                      0x24,
+    "Meteor Shower":                     0x17,
+    "Mirth":                             0x31,
+    "Misfortune":                        0x34,
+    "Prayer":                            0x30,
+    "Precision":                         0x2C,
+    "Protection from Air":               0x1E,
+    "Protection from Earth":             0x21,
+    "Protection from Fire":              0x1F,
+    "Protection from Water":             0x20,
+    "Quicksand":                         0x0A,
+    "Remove Obstacle":                   0x40,
+    "Resurrection":                      0x26,
+    "Sacrifice":                         0x28,
+    "Scuttle Boat":                      0x01,
+    "Shield":                            0x1B,
+    "Slayer":                            0x37,
+    "Slow":                              0x36,
+    "Sorrow":                            0x32,
+    "Stone Skin":                        0x2E,
+    "Summon Air Elemental":              0x45,
+    "Summon Boat":                       0x00,
+    "Summon Earth Elemental":            0x43,
+    "Summon Fire Elemental":             0x42,
+    "Summon Water Elemental":            0x44,
+    "Teleport":                          0x3F,
+    "Town Portal":                       0x09,
+    "Water Walk":                        0x07,
+    "Weakness":                          0x2D,
+    "View Air":                          0x05,
+    "View Earth":                        0x03,
+    "Visions":                           0x02,
+}
+
+
+"""Artifact slots, with first being primary slot."""
+ARTIFACT_SLOTS = {
+    "Ambassador's Sash":                 ["cloak"],
+    "Amulet of the Undertaker":          ["neck"],
+    "Angel Feather Arrows":              ["side"],
+    "Angel Wings":                       ["cloak"],
+    "Armor of Wonder":                   ["armor"],
+    "Arms of Legion":                    ["side"],
+    "Badge of Courage":                  ["side"],
+    "Bird of Perception":                ["side"],
+    "Blackshard of the Dead Knight":     ["weapon"],
+    "Boots of Levitation":               ["feet"],
+    "Boots of Polarity":                 ["feet"],
+    "Boots of Speed":                    ["feet"],
+    "Bow of Elven Cherrywood":           ["side"],
+    "Bowstring of the Unicorn's Mane":   ["side"],
+    "Breastplate of Brimstone":          ["armor"],
+    "Breastplate of Petrified Wood":     ["armor"],
+    "Buckler of the Gnoll King":         ["shield"],
+    "Cape of Conjuring":                 ["cloak"],
+    "Cape of Velocity":                  ["cloak"],
+    "Cards of Prophecy":                 ["side"],
+    "Celestial Necklace of Bliss":       ["neck"],
+    "Centaur's Axe":                     ["weapon"],
+    "Charm of Mana":                     ["side"],
+    "Clover of Fortune":                 ["side"],
+    "Collar of Conjuring":               ["neck"],
+    "Crest of Valor":                    ["side"],
+    "Crown of Dragontooth":              ["helm"],
+    "Crown of the Supreme Magi":         ["helm"],
+    "Dead Man's Boots":                  ["feet"],
+    "Diplomat's Ring":                   ["hand"],
+    "Dragon Scale Armor":                ["armor"],
+    "Dragon Scale Shield":               ["shield"],
+    "Dragon Wing Tabard":                ["cloak"],
+    "Dragonbone Greaves":                ["feet"],
+    "Emblem of Cognizance":              ["side"],
+    "Endless Bag of Gold":               ["side"],
+    "Endless Purse of Gold":             ["side"],
+    "Endless Sack of Gold":              ["side"],
+    "Equestrian's Gloves":               ["hand"],
+    "Everflowing Crystal Cloak":         ["cloak"],
+    "Everpouring Vial of Mercury":       ["side"],
+    "Eversmoking Ring of Sulfur":        ["hand"],
+    "Garniture of Interference":         ["neck"],
+    "Glyph of Gallantry":                ["side"],
+    "Golden Bow":                        ["side"],
+    "Greater Gnoll's Flail":             ["weapon"],
+    "Head of Legion":                    ["side"],
+    "Hellstorm Helmet":                  ["helm"],
+    "Helm of Chaos":                     ["helm"],
+    "Helm of Heavenly Enlightenment":    ["helm"],
+    "Helm of the Alabaster Unicorn":     ["helm"],
+    "Hourglass of the Evil Hour":        ["side"],
+    "Inexhaustible Cart of Lumber":      ["side"],
+    "Inexhaustible Cart of Ore":         ["side"],
+    "Ladybird of Luck":                  ["side"],
+    "Legs of Legion":                    ["side"],
+    "Lion's Shield of Courage":          ["shield"],
+    "Loins of Legion":                   ["side"],
+    "Mystic Orb of Mana":                ["side"],
+    "Necklace of Dragonteeth":           ["neck"],
+    "Necklace of Ocean Guidance":        ["neck"],
+    "Necklace of Swiftness":             ["neck"],
+    "Ogre's Club of Havoc":              ["weapon"],
+    "Orb of Driving Rain":               ["side"],
+    "Orb of the Firmament":              ["side"],
+    "Orb of Inhibition":                 ["side"],
+    "Orb of Silt":                       ["side"],
+    "Orb of Tempestuous Fire":           ["side"],
+    "Orb of Vulnerability":              ["side"],
+    "Pendant of Courage":                ["neck"],
+    "Pendant of Death":                  ["neck"],
+    "Pendant of Dispassion":             ["neck"],
+    "Pendant of Free Will":              ["neck"],
+    "Pendant of Holiness":               ["neck"],
+    "Pendant of Life":                   ["neck"],
+    "Pendant of Negativity":             ["neck"],
+    "Pendant of Second Sight":           ["neck"],
+    "Pendant of Total Recall":           ["neck"],
+    "Quiet Eye of the Dragon":           ["hand"],
+    "Recanter's Cloak":                  ["cloak"],
+    "Red Dragon Flame Tongue":           ["weapon"],
+    "Rib Cage":                          ["armor"],
+    "Ring of Conjuring":                 ["hand"],
+    "Ring of Infinite Gems":             ["hand"],
+    "Ring of Life":                      ["hand"],
+    "Ring of the Wayfarer":              ["hand"],
+    "Ring of Vitality":                  ["hand"],
+    "Sandals of the Saint":              ["feet"],
+    "Scales of the Greater Basilisk":    ["armor"],
+    "Sea Captain's Hat":                 ["helm"],
+    "Sentinel's Shield":                 ["shield"],
+    "Shackles of War":                   ["side"],
+    "Shield of the Damned":              ["shield"],
+    "Shield of the Dwarven Lords":       ["shield"],
+    "Shield of the Yawning Dead":        ["shield"],
+    "Skull Helmet":                      ["helm"],
+    "Speculum":                          ["side"],
+    "Spellbinder's Hat":                 ["helm"],
+    "Sphere of Permanence":              ["side"],
+    "Spirit of Oppression":              ["side"],
+    "Spyglass":                          ["side"],
+    "Statesman's Medal":                 ["neck"],
+    "Still Eye of the Dragon":           ["hand"],
+    "Stoic Watchman":                    ["side"],
+    "Surcoat of Counterpoise":           ["cloak"],
+    "Sword of Hellfire":                 ["weapon"],
+    "Sword of Judgement":                ["weapon"],
+    "Talisman of Mana":                  ["side"],
+    "Targ of the Rampaging Ogre":        ["shield"],
+    "The Grail":                         ["inventory"],
+    "Thunder Helmet":                    ["helm"],
+    "Titan's Cuirass":                   ["armor"],
+    "Titan's Gladius":                   ["weapon"],
+    "Tome of Air":                       ["side"],
+    "Tome of Earth":                     ["side"],
+    "Tome of Fire":                      ["side"],
+    "Tome of Water":                     ["side"],
+    "Torso of Legion":                   ["side"],
+    "Tunic of the Cyclops King":         ["armor"],
+    "Vampire's Cowl":                    ["cloak"],
+    "Vial of Lifeblood":                 ["side"],
+}
+
+
+"""Spells that artifacts make available to hero."""
+ARTIFACT_SPELLS = {
+    "Spellbinder's Hat":                 ["Dimension Door", "Fly", "Implosion",
+                                          "Sacrifice", "Summon Air Elemental",
+                                          "Summon Earth Elemental",
+                                          "Summon Fire Elemental",
+                                          "Summon Water Elemental"],
+
+    "Tome of Air":                       ["Air Shield", "Chain Lightning", "Counterstrike",
+                                          "Destroy Undead", "Dimension Door", "Disguise",
+                                          "Disrupting Ray", "Fly", "Fortune", "Haste",
+                                          "Hypnotize", "Lightning Bolt", "Magic Arrow",
+                                          "Magic Mirror", "Precision", "Protection from Air",
+                                          "Summon Air Elemental", "View Air", "Visions"],
+
+    "Tome of Earth":                     ["Animate Dead", "Anti-Magic", "Death Ripple",
+                                          "Earthquake", "Force Field", "Implosion",
+                                          "Magic Arrow", "Meteor Shower", "Protection from Earth",
+                                          "Quicksand", "Resurrection", "Shield", "Slow",
+                                          "Sorrow", "Stone Skin", "Summon Earth Elemental",
+                                          "Town Portal", "View Earth", "Visions"],
+
+    "Tome of Fire":                      ["Armageddon", "Berserk", "Blind", "Bloodlust",
+                                          "Curse", "Fire Shield", "Fire Wall", "Fireball",
+                                          "Frenzy", "Inferno", "Land Mine", "Magic Arrow",
+                                          "Misfortune", "Protection from Fire", "Sacrifice",
+                                          "Slayer", "Summon Fire Elemental", "Visions"],
+
+    "Tome of Water":                     ["Bless", "Clone", "Cure", "Dispel", "Forgetfulness",
+                                          "Frost Ring", "Ice Bolt", "Magic Arrow", "Mirth",
+                                          "Prayer", "Protection from Water", "Remove Obstacle",
+                                          "Scuttle Boat", "Summon Boat", "Summon Water Elemental",
+                                          "Teleport", "Visions", "Water Walk", "Weakness"],
+}
+
+
+"""Primary skill modifiers that artifacts give to hero."""
+ARTIFACT_STATS = {
+    "Crown of Dragontooth":              ( 0,  0, +4, +4),
+    "Crown of the Supreme Magi":         ( 0,  0,  0, +4),
+    "Hellstorm Helmet":                  ( 0,  0,  0, +5),
+    "Helm of Chaos":                     ( 0,  0,  0, +3),
+    "Helm of Heavenly Enlightenment":    (+6, +6, +6, +6),
+    "Helm of the Alabaster Unicorn":     ( 0,  0,  0, +1),
+    "Skull Helmet":                      ( 0,  0,  0, +2),
+    "Thunder Helmet":                    ( 0,  0, -2, 10),
+
+    "Celestial Necklace of Bliss":       (+3, +3, +3, +3),
+    "Necklace of Dragonteeth":           ( 0,  0, +3, +3),
+
+    "Blackshard of the Dead Knight":     (+3,  0,  0,  0),
+    "Centaur's Axe":                     (+2,  0,  0,  0),
+    "Greater Gnoll's Flail":             (+4,  0,  0,  0),
+    "Ogre's Club of Havoc":              (+5,  0,  0,  0),
+    "Red Dragon Flame Tongue":           (+2, +2,  0,  0),
+    "Sword of Hellfire":                 (+6,  0,  0,  0),
+    "Sword of Judgement":                (+5, +5, +5, +5),
+    "Titan's Gladius":                   (12, -3,  0,  0),
+
+    "Buckler of the Gnoll King":         ( 0, +4,  0,  0),
+    "Dragon Scale Shield":               ( 0,  0, +3, +3),
+    "Lion's Shield of Courage":          (+4, +4, +4, +4),
+    "Sentinel's Shield":                 (-3, 12,  0,  0),
+    "Shield of the Damned":              ( 0, +6,  0,  0),
+    "Shield of the Dwarven Lords":       ( 0, +2,  0,  0),
+    "Shield of the Yawning Dead":        ( 0, +3,  0,  0),
+    "Targ of the Rampaging Ogre":        ( 0, +5,  0,  0),
+
+    "Armor of Wonder":                   (+1, +1, +1, +1),
+    "Rib Cage":                          ( 0,  0, +2,  0),
+    "Breastplate of Brimstone":          ( 0,  0, +5,  0),
+    "Breastplate of Petrified Wood":     ( 0,  0, +1,  0),
+    "Dragon Scale Armor":                (+4, +4,  0,  0),
+    "Scales of the Greater Basilisk":    ( 0,  0, +3,  0),
+    "Titan's Cuirass":                   ( 0,  0, 10, -2),
+    "Tunic of the Cyclops King":         ( 0,  0, +4,  0),
+
+    "Quiet Eye of the Dragon":           (+1, +1,  0,  0),
+
+    "Dragonbone Greaves":                ( 0,  0, +1, +1),
+    "Sandals of the Saint":              (+2, +2, +2, +2),
+}
+
+
+"""
+Spell scroll artifacts, IDs like "01 00 00 00 09 00 00 00",
+with 01 standing for spell scroll and 09 for Town Portal.
+"""
+SCROLL_ARTIFACTS = []
+for t in SPELLS:
+    n = "%s: %s" % ("Spell Scroll", t)
+    ARTIFACTS.append(n)
+    ARTIFACT_SLOTS[n]  = ["side"]
+    ARTIFACT_SPELLS[n] = [t]
+    IDS[n] = (IDS[t] << 32) + IDS["Spell Scroll"]
+    SCROLL_ARTIFACTS.append(n)
+
+
+TOWN_NAMES = [
+    # Castle
+    "Alexandretta", "Armitage", "Brettonia", "Castellatus", "Claxton", "Cornerstone",
+    "Dunwall", "Gateway", "Highcastle", "Kanan", "Kildare", "Middleheim",
+    "Transom", "Whistledale", "Whitemoon", "Whitestone",
+    # Rampart
+    "Bath'iere", "Ceiliedgh", "Elfwind", "Emerald Moor", "Forest", "Forest Glen",
+    "Fortune Keep", "Green Falls", "Gladeroot", "Marishen", "Rainhaven",
+    "Serenity", "Still Water", "Strongglen", "Wild Willow", "Wise Oak",
+    # Tower
+    "Athenaeum", "Ayer", "Cloudfire", "Cloudspire", "Corona", "Equinox",
+    "Facture", "Fallen Star", "Machina", "Manufactury", "Mystos", "Silverspire",
+    "Silverwing", "Stronggale", "Tirith", "Valtara",
+    # Inferno
+    "Abaddon", "Acheron", "Ashcombe", "Ashden", "Blackburn", "Brimstone",
+    "Candent", "Cinderspire", "Daemon Gate", "Enkindle", "Firebrand", "Gehenna",
+    "Hellwind", "Stygius", "Styx", "Tartaros",
+    # Necropolis
+    "Agony", "Blackquarter", "Blight", "Cessacioun", "Coldreign", "Coldsoul",
+    "Dark Cloud", "Dark Eternal", "Death's Gate", "Ghostwind", "Grave Raven",
+    "Haunt's Wind", "Sanctum", "Shadow Keep", "Terminus", "Worm Warren",
+    # Dungeon
+    "Blindroot", "Castigare", "Chillwater", "Coldshadow", "Darkburrow", "Darkhold",
+    "Deepshadow", "Dragonnade", "Evernight", "Lost Hold", "Malev", "Scar",
+    "Shade", "Shadowden", "Sorrow Crown", "Veks",
+    # Stronghold
+    "Battlement", "Bocc", "Cragmoor", "Dolere", "Drago Breach", "Dragonspire",
+    "Hartgrim", "Kragg", "Kruber", "Morganheim", "Rockwarren", "Rovener",
+    "Sandflash", "Slau", "Strongglen", "Tormina",
+    # Fortress
+    "Backwater", "Coolmire", "Deadfall", "Deadwood", "Drakenmoor", "Edgewater",
+    "Hermit Cove", "Lostmoor", "Marshank", "Marshchoke", "Marshwall", "Mossden",
+    "Mosswood", "Mudshire", "Silt", "Stillbog",
+    # Conflux
+    "Ceald", "Electrising", "Elementon", "Fenderen", "Fleogan Mills", "Froisan",
+    "Igne", "Lagumoor", "Lanting", "Magmetin", "Massein", "Solium",
+    "Styriam", "Ventu", "Vluchton", "Wazzar",
+    # Cove
+    "Brown's Bay", "Downhaven", "Hitchgrove", "Jordanhall", "Lakenshire", "Lewindale",
+    "Nithenes", "Noral", "Port Crowland", "Port Evendore", "Rotunda", "Sleepy Creek",
+    "Tartaglia", "Walendale", "Watergate", "Westland Pier",
+    # Factory
+    "Arcadia", "Ardon", "Aurichalcum", "Burton", "Corakstone", "Darentor",
+    "Endurance", "Fort Rotwang", "Kergar", "Mount Copper", "New Dolere", "Prospero",
+    "Ridder", "Salda", "Volta", "Vulcan",
+    # Bulwark
+    "Alfheim","Anabar","Borea","Ellesmere","Everwinter","Halsmere","Jotunngard","Ketpall",
+    "Meghion","Stonefang","Thulekh","Tundara","Varand","White Mouth","Windskalir","Winterkill"
+    # Custom / campaign names
+    "Plinth", "Mirham", "Terraneus", "Trailia", "Caryatid", "Fair Feather",
+    "Steadwick", "Kleesive", "Stonecastle", "Avalon", "Welnin", "Defiance",
+    "Marshallston", "Pandathalyn", "Southerdale", "Nothenden", "Endelstadt",
+    "Goldenton", "Jhantaqua", "Noximaar", "Darqtane", "Dova Saera", "Moribund",
+    "Dragonbane", "Whitespire", "Kaffinar", "Ciara", "Soal", "Shelindria",
+    "Azrael Field", "Scorch", "Dagger Peak", "Vandal Hall", "Faler-on-Sea",
+    "Keventry", "Shaynda", "Gelliston", "Chillwater", "Bane Bridge", "Reaver Cove",
+    "Doom's Crest", "Sorrow Glen", "Asha's Cairn", "Flann", "Ultana", "Caledoorn",
+    "Zaridon", "Moortanis", "Jagos", "Reyn Tarrina", "Tormentalis", "Fayadon",
+    "Xent'a", "Kelvishen", "Xent'ara", "Shanimar", "Staeverin", "Andershire",
+    "Calembria", "Kreelah", "Aglorande", "Socon", "Decotta", "Harpy's Rock",
+    "Dead Timber", "Death Kiss", "Sinkhole", "Dank Rock", "Gruen Point",
+    "No Quarter", "Red Spider", "Gloom Cave", "Fetid Cavern", "Bat Fang",
+    "Camp Dracon", "Talirindë", "Ochre", "Asenius", "House Degab", "House Telez",
+    "House Vilmit", "House Kilgor", "Brastleton", "Scarlum", "Andara", "Hounde",
+    "Nokaneng", "Caprivi", "Djibo", "Tougane", "Plumtree", "Warrenton", "Zipfel",
+    "Nylstroom", "Rundu", "Kuruman", "Rakops", "Bangassou", "Thanel Falls",
+    "Aseranton", "Sehithwa", "Ghanzi", "Clifftree", "Leafhall", "Daggercourt",
+    "Timintal", "First Sword", "Second Sword", "Padon", "Groa", "Calarnen",
+    "Ulgak", "Hoddar", "Hartferd", "Willowglen", "Soledare", "Crypthome",
+    "Radstone"
+]
+
+
+@contextlib.contextmanager
+def patch_gzip_for_partial():
+    """
+    Context manager replacing gzip.GzipFile._read_eof() with a version not throwing CRC error.
+    For decompressing partial files.
+    """
+
+    def read_eof_py3(self):
+        if not all(self._fp.read(1) for _ in range(8)): # Consume and require 8 bytes of CRC
+            raise EOFError("Compressed file ended before the end-of-stream marker was reached")
+        c = b"\x00"
+        while c == b"\x00": c = self._fp.read(1) # Consume stream until first non-zero byte
+        if c: self._fp.prepend(c)
+
+    def read_eof_py2(self):
+        c = "\x00"
+        while c == "\x00": c = self.fileobj.read(1) # Consume stream until first non-zero byte
+        if c: self.fileobj.seek(-1, 1)
+
+    readercls = getattr(gzip, "_GzipReader", gzip.GzipFile)  # Py3/Py2
+    read_eof_original = readercls._read_eof
+    readercls._read_eof = read_eof_py2 if readercls is gzip.GzipFile else read_eof_py3
+
+    try: yield
+    finally: readercls._read_eof = read_eof_original
+    
+
+class Savefile(object):
+    """Game savefile."""
+
+    RGX_MAGIC = re.compile(b"^H3SV[GC]")
+
+    RGX_HEADER = re.compile(b"""
+        H3SV[GC]            # file header
+        .{0,100}[^\x00]     # unknown content, unknown length
+        \x00{3}.            # unknown
+        (?P<name>..)        # map name length, unsigned 16-bit big-endian
+        [^\x00]+            # map name
+        ..                  # map description length, unsigned 16-bit big-endian
+        [^\x00]+            # map description
+    """, re.VERBOSE | re.DOTALL)
+
+    HEADER_TEXTS = OrderedDict([("name", 2), ("desc", 2)])  # {name in mapdata: byte length count}
+
+    TOWN_REGEX = re.compile(b"\x00{10,30}(.{4})(.{2})([^\x00]{4,20}[\x00*@?H]?)", re.DOTALL)
+    #TOWN_REGEX = re.compile(b"\x00{10,50}(.{4})(.{2})([^\x00]{1,30}[\x00*@?H]?)", re.DOTALL)
+
+    owner_colors = {
+        0x00: "Red",
+        0x01: "Blue",
+        0x02: "Tan",
+        0x03: "Green",
+        0x04: "Orange",
+        0x05: "Purple",
+        0x06: "Teal",
+        0x07: "Pink",
+        0xFF: "None"
+    }
+
+    faction_mapping = {
+        0x00: "Castle",
+        0x01: "Rampart",
+        0x02: "Tower",
+        0x03: "Inferno",
+        0x04: "Necropolis",
+        0x05: "Dungeon",
+        0x06: "Stronghold",
+        0x07: "Fortress",
+        0x08: "Conflux",
+        0x09: "Cove",
+        0x0A: "Factory",
+        0x0B: "Sanctum",
+        0x0C: "Harbor",
+        0x0D: "Cathedral",
+        0x0E: "Krewlod",  # mod factions
+        0x0F: "Kreegan",
+        0x10: "Preserve"
+    }
+
+    creature_mapping = {
+        0x00: "Pikeman",
+        0x01: "Halberdier",
+        0x02: "Archer",
+        0x03: "Marksman",
+        0x04: "Griffin",
+        0x05: "Royal Griffin",
+        0x06: "Swordsman",
+        0x07: "Crusader",
+        0x08: "Monk",
+        0x09: "Zealot",
+        0x0A: "Cavalier",
+        0x0B: "Champion",
+        0x0C: "Angel",
+        0x0D: "Archangel",
+        0x0E: "Centaur",
+        0x0F: "Centaur Captain",
+        0x10: "Dwarf",
+        0x11: "Battle Dwarf",
+        0x12: "Wood Elf",
+        0x13: "Grand Elf",
+        0x14: "Pegasus",
+        0x15: "Silver Pegasus",
+        0x16: "Dendroid Guard",
+        0x17: "Dendroid Soldier",
+        0x18: "Unicorn",
+        0x19: "War Unicorn",
+        0x1A: "Green Dragon",
+        0x1B: "Gold Dragon",
+        0x1C: "Gremlin",
+        0x1D: "Master Gremlin",
+        0x1E: "Stone Gargoyle",
+        0x1F: "Obsidian Gargoyle",
+        0x20: "Stone Golem",
+        0x21: "Iron Golem",
+        0x22: "Mage",
+        0x23: "Arch Mage",
+        0x24: "Genie",
+        0x25: "Master Genie",
+        0x26: "Naga",
+        0x27: "Naga Queen",
+        0x28: "Giant",
+        0x29: "Titan",
+        0x2A: "Imp",
+        0x2B: "Familiar",
+        0x2C: "Gog",
+        0x2D: "Magog",
+        0x2E: "Hell Hound",
+        0x2F: "Cerberus",
+        0x30: "Demon",
+        0x31: "Horned Demon",
+        0x32: "Pit Fiend",
+        0x33: "Pit Lord",
+        0x34: "Efreeti",
+        0x35: "Efreet Sultan",
+        0x36: "Devil",
+        0x37: "Arch Devil",
+        0x38: "Skeleton",
+        0x39: "Skeleton Warrior",
+        0x3A: "Walking Dead",
+        0x3B: "Zombie",
+        0x3C: "Wight",
+        0x3D: "Wraith",
+        0x3E: "Vampire",
+        0x3F: "Vampire Lord",
+        0x40: "Lich",
+        0x41: "Power Lich",
+        0x42: "Black Knight",
+        0x43: "Dread Knight",
+        0x44: "Bone Dragon",
+        0x45: "Ghost Dragon",
+        0x46: "Troglodyte",
+        0x47: "Infernal Troglodyte",
+        0x48: "Harpy",
+        0x49: "Harpy Hag",
+        0x4A: "Beholder",
+        0x4B: "Evil Eye",
+        0x4C: "Medusa",
+        0x4D: "Medusa Queen",
+        0x4E: "Minotaur",
+        0x4F: "Minotaur King",
+        0x50: "Manticore",
+        0x51: "Scorpicore",
+        0x52: "Red Dragon",
+        0x53: "Black Dragon",
+        0x54: "Goblin",
+        0x55: "Hobgoblin",
+        0x56: "Wolf Rider",
+        0x57: "Wolf Raider",
+        0x58: "Orc",
+        0x59: "Orc Chieftain",
+        0x5A: "Ogre",
+        0x5B: "Ogre Mage",
+        0x5C: "Roc",
+        0x5D: "Thunderbird",
+        0x5E: "Cyclops",
+        0x5F: "Cyclops King",
+        0x60: "Behemoth",
+        0x61: "Ancient Behemoth",
+        0x62: "Gnoll",
+        0x63: "Gnoll Marauder",
+        0x64: "Lizardman",
+        0x65: "Lizard Warrior",
+        0x66: "Gorgon",
+        0x67: "Mighty Gorgon",
+        0x68: "Serpent Fly",
+        0x69: "Dragon Fly",
+        0x6A: "Basilisk",
+        0x6B: "Greater Basilisk",
+        0x6C: "Wyvern",
+        0x6D: "Wyvern Monarch",
+        0x6E: "Hydra",
+        0x6F: "Chaos Hydra",
+        0x70: "Air Elemental",
+        0x71: "Earth Elemental",
+        0x72: "Fire Elemental",
+        0x73: "Water Elemental",
+        0x74: "Gold Golem",
+        0x75: "Diamond Golem",
+        0x76: "Pixie",
+        0x77: "Sprite",
+        0x78: "Psychic Elemental",
+        0x79: "Magic Elemental",
+        0x7B: "Ice Elemental",
+        0x7F: "Storm Elemental",
+        0x81: "Energy Elemental",
+        0x82: "Firebird",
+        0x83: "Phoenix",
+        0x84: "Azure Dragon",
+        0x85: "Crystal Dragon",
+        0x86: "Faerie Dragon",
+        0x87: "Rust Dragon",
+        0x88: "Enchanter",
+        0x89: "Sharpshooter",
+        0x8A: "Halfling",
+        0x8B: "Peasant",
+        0x8C: "Boar",
+        0x8D: "Mummy",
+        0x8E: "Nomad",
+        0x8F: "Rogue",
+        0x90: "Troll",
+        0x97: "Sea Dog",
+        0x99: "Nymph",
+        0x9A: "Oceanid",
+        0x9B: "Crew Mate",
+        0x9C: "Seaman",
+        0x9D: "Pirate",
+        0x9E: "Corsair",
+        0x9F: "Stormbird",
+        0xA0: "Ayssid",
+        0xA1: "Sea Witch",
+        0xA2: "Sorceress",
+        0xA3: "Nix",
+        0xA4: "Nix Warrior",
+        0xA5: "Sea Serpent",
+        0xA6: "Haspid",
+        0xA7: "Satyr",
+        0xA8: "Fangarm",
+        0xA9: "Leprechaun",
+        0xAA: "Steel Golem",
+        0xAB: "Halfling Grenadier",
+        0xAC: "Mechanic",
+        0xAD: "Engineer",
+        0xAE: "Armadillo",
+        0xAF: "Bellwether Armadillo",
+        0xB0: "Automaton",
+        0xB1: "Sentinel Automaton",
+        0xB2: "Sandworm",
+        0xB3: "Olgoi-Khorkhoi",
+        0xB4: "Gunslinger",
+        0xB5: "Bounty Hunter",
+        0xB6: "Couatl",
+        0xB7: "Crimson Couatl",
+        0xB8: "Dreadnought",
+        0xB9: "Juggernaut",
+        0xBA: "Kobold",
+        0xBB: "Kobold Foreman",
+        0xBC: "Mountain Ram",
+        0xBD: "Argali",
+        0xBE: "Snow Elf",
+        0xBF: "Steel Elf",
+        0xC0: "Yeti",
+        0xC1: "Yeti Runemaster",
+        0xC2: "Shaman",
+        0xC3: "Great Shaman",
+        0xC4: "Mammoth",
+        0xC5: "War Mammoth",
+        0xC6: "Jotunn",
+        0xC7: "Jotunn Warlord",
+
+        0xFFFFFFFF: "Empty Slot"
+    }
+
+
+    def __init__(self, filename, parse_heroes=True):
+        self.filename = filename
+        self.raw      = None
+        self.raw0     = None
+        self.version  = None
+        self.dt       = None
+        self.mapdata  = {}
+        self.map_visibility_section = 0
+        self.map_exploration_stats = []
+        self.size     = 0
+        self.usize    = 0
+        self.town_section_start = None
+        self.heroes   = []
+        self.towns    = []
+        #self.dragon_utopias = []
+        self.player_sections = []
+        self.player_resources = []
+        self.maptiles    = []
+        self.read(parse_heroes)
+        #self.get_map_exploration()
+
+    def patch(self, bytes, span):
+        """Patches unpacked contents with bytes from span[0] to span[1]."""
+        if not span or not bytes: return
+        self.raw = self.raw[0:span[0]] + bytes + self.raw[span[1]:]
+        self.usize = len(self.raw)
+
+    def realize(self):
+        """Validates and updates changed hero data, patches savefile unpacked contents for write."""
+        heroes_changed = [h for h in self.heroes if h.is_changed()]
+        for hero in heroes_changed: hero.serialize()
+        for hero in self.heroes: self.patch(hero.bytes, hero.span)
+
+    def read(self, parse_heroes=True):
+        """Reads in file raw contents and main attributes."""
+        with patch_gzip_for_partial():
+            with gzip.GzipFile(self.filename, "rb") as f: raw = bytearray(f.read())
+        self.raw0 = self.raw = raw
+        self.mapdata = {}
+        self.heroes = []
+        self.towns = []
+        self.detect_version()
+        logger.debug(f"Parsing metadata...")
+        self.parse_metadata()
+        logger.debug(f"Get map info from description...")
+        self.split_map_description()
+        #self.parse_towns()
+        logger.debug(f"Extract town info...")
+        self.find_towns_by_header()
+        #logger.debug(f"Get player resources...")
+        #self.player_resources = self.extract_player_sections(self.raw)
+        logger.debug(f"Extract maptiles for map: {self.mapdata}")
+        self.maptiles = utopias.extract_tiles(self.raw, int(self.mapdata['size']), int(self.mapdata['levels']), utopias.find_tile_block_start(self.raw))
+
+
+        #Debug - list all maptiles values:
+        # self.list_maptiles()
+        
+        if parse_heroes: self.parse_heroes()
+        logger.debug(f"Get exploration data...")
+        self.get_map_exploration()
+        logger.debug(f"Get player resources...")
+        self.player_resources = self.extract_player_sections(self.raw)
+
+        self.update_info()
+        logger.debug("Opened %s (%s, unzipped %s).", self.filename,
+                    util.format_bytes(self.size), util.format_bytes(self.usize))
+        
+    def list_maptiles(self):
+        logger.debug("------ MAPTILES ------")
+        for i, maptile in enumerate(self.maptiles):
+            logger.debug(f"{i:09d} ({maptile[0]:06d}): {maptile[1].hex()}")
+
+    def summarize_tile_visibility_per_player(self) -> dict:
+        """
+        Returns a dictionary mapping player index (0–7) to the number of tiles they can see.
+        Assumes self.map_exploration_stats is a list of 8-character strings representing reversed bitmasks.
+        """
+        summary = {i: 0 for i in range(8)}
+    
+        for bitmask in self.map_exploration_stats:
+            for i in range(8):
+                if bitmask[i] == '1':
+                    summary[i] += 1
+    
+        return summary
+    
+    def get_dynamic_map_view(self, player):
+        """
+        Return complete fog of war for a given player in the given turn 
+        """
+        fogofwar = ""
+
+        #----------- map_exploration_stats are empty
+        #logger.debug(f"dynamic_map_check: {self.map_exploration_stats}")
+        fogofwar = "".join(str(bitmask[player]) for bitmask in self.map_exploration_stats)
+        #for bitmask in self.map_exploration_stats:
+        #    fogofwar.join(str(bitmask[player]))
+        #logger.debug(f"bitmask fogofwarjoned:{fogofwar}")
+        return fogofwar
+
+    #def write(self, filename=None):
+    #    """Writes out gzipped file."""
+    #    filename = filename or self.filename
+    #    try: os.makedirs(os.path.dirname(filename))
+    #    except Exception: pass
+    #    with gzip.GzipFile(filename, "wb") as f: f.write(bytes(self.raw))
+    #    self.raw0 = self.raw
+    #    self.update_info(filename)
+    #    for hero in self.heroes:
+    #        if hero.is_patched(self): hero.mark_saved()
+    #    logger.info("Saved %s (%s, unzipped %s).", filename,
+    #                util.format_bytes(self.size), util.format_bytes(self.usize))
+#
+    #def write_ranges(self, spans, filename=None):
+    #    """Writes out gzipped file with specified byte ranges only."""
+    #    filename = filename or self.filename
+    #    raw = self.raw0
+    #    for start, end in spans: raw = raw[0:start] + self.raw[start:end] + raw[end:]
+    #    with gzip.GzipFile(filename, "wb") as f: f.write(bytes(raw))
+    #    self.raw0 = raw
+    #    self.update_info(filename)
+    #    for hero in self.heroes:
+    #        if any(hero.span[0] >= start and hero.span[1] < end for start, end in spans):
+    #            if hero.is_patched(self): hero.mark_saved()
+    #    logger.info("Saved %s byte %s %s (%s, unzipped %s).", filename,
+    #                util.plural("range", spans, numbers=False),
+    #                " and ".join("..".join(map(str, x)) for x in spans),
+    #                util.format_bytes(self.size), util.format_bytes(self.usize))
+
+    def detect_version(self):
+        """Auto-detects game version, raises error if savefile not recognizable."""
+        RGX_MAGIC = h3tools.version.adapt("savefile_magic_regex", self.RGX_MAGIC)
+        if not RGX_MAGIC.match(self.raw):
+            raise ValueError("Not recognized as Heroes3 savefile.")
+        self.version = h3tools.version.detect(self) # Raises ValueError if not detected
+        self.mapdata["game"] = self.version
+        if self.version in h3tools.version.VERSIONS:
+            self.mapdata["game"] = h3tools.version.VERSIONS[self.version].TITLE
+        logger.debug("Detected %s as version %r.", self.filename, self.version)
+    
+    def extract_player_sections(self, raw_data):
+        """Dynamically detect and extract 200-byte player blocks for 8 HotA players."""
+        from collections import OrderedDict
+        import struct
+
+        # Preconditions
+        if not hasattr(self, 'town_section_start') or self.town_section_start is None:
+            logger.debug(f"There were no towns found in the game, skipping player sections.")
+            return []
+            
+        # Parameters
+        block_size = 200
+        player_count = 8
+        spacing = 149  # bytes between blocks
+        search_window_size = 2000  # bytes to search before town section
+        ff_signature = b'\xff' * 11
+        player_colors = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink"]
+        resource_names = ["wood", "mercury", "ore", "sulfur", "crystals", "gems", "gold"]
+        expected_min = [0, 0, 0, 0, 0, 0, 0]
+        expected_max = [999, 999, 999, 999, 999, 999, 3000000]
+
+        player_sections = []
+
+        start_offset = max(0, self.town_section_start - search_window_size)
+        end_offset = self.town_section_start
+
+        # Get map exloration info
+        map_exploration = self.summarize_tile_visibility_per_player()
+        #logger.debug(f"Visibility bitmasks: {self.map_exploration_stats}")
+        logger.debug(f"Exploration stats: {map_exploration}")
+
+        for offset in range(start_offset, end_offset + block_size):
+            # Try to read the first block
+            first_block = raw_data[offset:offset + block_size]
+            if len(first_block) < block_size or not first_block.startswith(ff_signature):
+                continue
+
+            match_score = 0
+            candidate_blocks = []
+            for i in range(player_count):
+                block_offset = offset + i * spacing
+                block = raw_data[block_offset:block_offset + block_size]
+                if len(block) < block_size or not block.startswith(ff_signature):
+                    break
+
+                try:
+                    resource_bytes = block[0x0B:0x0B + 28]
+                    values = struct.unpack('<7I', resource_bytes)
+                    valid = all(expected_min[j] <= values[j] <= expected_max[j] for j in range(7))
+                    if not valid:
+                        break
+                    resources = OrderedDict((name, val) for name, val in zip(resource_names, values))
+
+                    candidate_blocks.append({
+                        "color": player_colors[i],
+                        "start_offset": block_offset,
+                        "hex_snippet": resource_bytes.hex(),
+                        "length": len(block),
+                        "resources": resources,
+                        "tiles_explored": map_exploration.get(i),
+                        "fog_of_war": self.get_dynamic_map_view(i)
+                    })
+                    match_score += 1
+                except struct.error:
+                    break
+
+            if match_score == player_count:
+                #print(f"Match found at offset 0x{offset:08X}")
+                #for section in candidate_blocks:
+                    #resource_str = ", ".join(f"{k}={v}" for k, v in section["resources"].items())
+                    #print(f"[{section['color']}] Offset=0x{section['start_offset']:08X}, Resources: {resource_str}")
+                player_sections.extend(candidate_blocks)
+                break  # Stop after first valid set
+
+        return player_sections
+
+    def parse_metadata(self):
+        """Populates savefile map name and description."""
+        RGX_HEADER = h3tools.version.adapt("savefile_header_regex", self.RGX_HEADER)
+        match = RGX_HEADER.match(self.raw[:2048])
+        if not match:
+            logger.warning("Failed to parse map name and description from %s.", self.filename)
+            return
+        cpos = match.start(next(iter(self.HEADER_TEXTS)))  # Start of field length count
+        for n, clen in self.HEADER_TEXTS.items():  # Parse consecutivself.mapdatae length-value fields
+            try:
+                nlen = util.bytoi(self.raw[cpos:cpos + clen])
+                nraw = self.raw[cpos + clen:cpos + clen + nlen]
+                if not re.match(b"^[^\x00]+$", nraw):
+                    raise ValueError("Unexpected content in map %s: %r" % (n, nraw))
+                self.mapdata[n] = util.to_unicode(nraw)
+                cpos += clen + nlen
+            except Exception:
+                logger.exception("Failed to parse map name and description from %s.", self.filename)
+        if "game" in self.mapdata: self.mapdata["game"] = self.mapdata.pop("game") # Order last
+
+    
+    def split_map_description(self):
+        desc = self.mapdata.get("desc", "")
+
+        # Extract structured fields with regex
+        match = re.search(
+            r"Random seed was (-?\d+), size (\d+), levels (\d+), humans (\d+), computers (\d+), water (\w+), monsters (\d+)",
+            desc
+        )
+
+        if match:
+            (
+                seed, size, levels, humans,
+                computers, water, monsters
+            ) = match.groups()
+
+            # Remove matched portion from the desc
+            cleaned_desc = desc.replace(match.group(0), "").strip().strip(',')
+
+            # Update the dictionary
+            self.mapdata.update({
+                "random_seed": int(seed),
+                "size": int(size),
+                "levels": int(levels),
+                "humans": int(humans),
+                "computers": int(computers),
+                "water": water,
+                "monsters": int(monsters),
+                "desc": cleaned_desc
+            })
+
+    def find_hero_section_start(self):
+        """Find the start offset of the hero section using HERO_REGEX."""
+        REGEX = h3tools.version.adapt("hero_regex", HERO_REGEX, version=self.version)
+        pos = 30000  # Start search at 0x7530
+        match = REGEX.search(self.raw[pos:])
+        if match:
+            hero_start = pos + match.start()
+            #logger.debug("Hero section starts at offset 0x%08X", hero_start)
+            return hero_start
+        logger.warning("No hero section found starting from offset 0x7530")
+        return len(self.raw)  # Fallback to end of file if no heroes found
+
+    def find_towns_by_header(self):
+        """
+        Name-first town finder using TOWN_NAMES.
+        Looks up each town name in self.raw, verifies the string header (len + 0x00),
+        then extracts coords/owner/faction/garrison using known offsets relative to the
+        start of the town name.
+        """
+
+        self.towns = []
+        # keep existing value if set elsewhere
+        if not hasattr(self, "town_section_start"):
+            self.town_section_start = None
+
+        # Build a bytes regex: (name1|name2|...)
+        name_bytes_escaped = []
+        ascii_names = []
+        for n in TOWN_NAMES:
+            if not n:
+                continue
+            try:
+                nb = n.encode("ascii")
+            except UnicodeEncodeError:
+                # Skip non-ASCII names; your save strings here appear to be ASCII
+                if 'logger' in globals():
+                    logger.debug(f"Skipping non-ASCII town name: {n!r}")
+                continue
+            name_bytes_escaped.append(re.escape(nb))
+            ascii_names.append(n)
+
+        if not name_bytes_escaped:
+            if 'logger' in globals():
+                logger.warning("No ASCII town names available in TOWN_NAMES.")
+            return
+
+        pattern = re.compile(b"(" + b"|".join(name_bytes_escaped) + b")")
+
+        seen_offsets = set()
+        for m in pattern.finditer(self.raw):
+            name_bytes = m.group(1)
+            name_start = m.start(1)
+
+            # Need 2 bytes before name for (len, 0x00)
+            if name_start < 2:
+                continue
+
+            # Verify string header: [len][0x00]<name...>
+            length_byte = self.raw[name_start - 2]
+            separator = self.raw[name_start - 1]
+            if length_byte != len(name_bytes) or separator != 0x00:
+                # Likely a stray appearance (e.g., rumor text) — skip
+                continue
+
+            # Offsets relative to the start of the name (same as your previous logic)
+            coord_offset = name_start - 71
+            if coord_offset < 0:
+                continue
+
+            # Extract coords and layer
+            try:
+                x = self.raw[coord_offset + 4]
+                y = self.raw[coord_offset + 5]
+                z = self.raw[coord_offset + 6]
+            except IndexError:
+                continue
+
+            # Basic sanity checks
+            if z not in (0, 1):
+                continue
+            map_size = getattr(self, "map_size", None)
+            if isinstance(map_size, int):
+                if not (0 <= x < map_size and 0 <= y < map_size):
+                    continue
+
+            owner = self.owner_colors.get(self.raw[coord_offset], "None")
+            faction = self.faction_mapping.get(self.raw[coord_offset + 3])
+
+            garrison_offset = coord_offset + 9
+            garrison = self.parse_garrison(garrison_offset)
+
+            # Decode name (safe: we built from ASCII)
+            name = name_bytes.decode("ascii")
+
+            if name_start not in seen_offsets:
+                self.towns.append({
+                    "name": name,
+                    "type": faction,
+                    "owner": owner,
+                    "offset": name_start,
+                    "coords": [x, y, "Underground" if z == 1 else "Surface"],
+                    "garrison": garrison,
+                })
+                seen_offsets.add(name_start)
+            
+                logger.debug(f"Found {faction} town {name} controlled by {owner}. Garrison: {garrison}")
+
+                if self.town_section_start is None:
+                    self.town_section_start = name_start
+                    if 'logger' in globals():
+                        logger.debug(f"First town found at 0x{name_start:08X} — stored as town_section_start")
+
+        # Optional: fall back to your old header heuristic if nothing found
+        if not self.towns:
+            if 'logger' in globals():
+                logger.debug("Name-first scan yielded 0 towns; consider falling back to header heuristic.")
+            
+    def parse_garrison(self, offset):
+        garrison_start = offset
+        creature_ids = []
+        creature_counts = []
+
+        try:
+            for i in range(7):
+                id_offset = garrison_start + (i * 4)
+                creature_id = int.from_bytes(self.raw[id_offset:id_offset + 4], 'little')
+                creature_ids.append(creature_id)
+
+            count_base = garrison_start + (7 * 4)
+            for i in range(7):
+                count_offset = count_base + (i * 4)
+                creature_count = int.from_bytes(self.raw[count_offset:count_offset + 4], 'little')
+                creature_counts.append(creature_count)
+
+            garrison = []
+            for cid, count in zip(creature_ids, creature_counts):
+                if cid != 0xFFFFFFFF and count > 0:
+                    creature_name = self.creature_mapping.get(cid, f"Unknown({cid})")
+                    garrison.append({"id": cid, "name": creature_name, "count": count})
+
+
+        except Exception as e:
+            print(f"Failed to parse garrison for at offset {garrison_start}: {e}")
+            garrison = []
+        return garrison
+
+    def parse_heroes(self):
+        """Populates and parses all savefile heroes in detail."""
+        if not self.heroes: self.populate_heroes()
+        for hero in self.heroes: hero.parse()
+
+    def populate_heroes(self):
+        heroes = []
+        rgx_strip = re.compile(br"^(?!\xFF+\x00+$)([^\x00-\x19]+)\x00+$")
+        rgx_nulls = re.compile(br"^(\x00+)|(\x00{4}\xFF{4})+$")
+        REGEX = h3tools.version.adapt("hero_regex", HERO_REGEX, version=self.version)
+        pos = 30000
+        m = re.search(REGEX, self.raw[pos:])
+        while m:
+            start, end = m.span()
+            if rgx_strip.match(m.group("name")) and not rgx_nulls.match(m.group("equipment")):
+                blob = bytearray(self.raw[pos + start:pos + end])
+                name = util.to_unicode(rgx_strip.match(m.group("name")).group(1))
+                hero = h3tools.hero.Hero(name, version=self.version)
+                hero.set_file_data(blob, len(heroes), (start + pos, end + pos))  # Pass self.raw
+                
+                #print(f"Found hero: {name} at offset: {pos+start-63} to {pos+end}")
+                fullblob = bytearray(self.raw[pos + start-63:pos + end])
+                ownership_byte = fullblob[0x20] if len(fullblob) > 0x20 else 255
+                hero.set_owner(ownership_byte)
+                #print(f"Ownership byte (0x20): 0x{ownership_byte:02X} ({ownership_byte})")
+                #print(f"Player: {hero.owner}")
+                heroes.append(hero)
+                pos += end
+            else:
+                pos += start + 1
+            m = re.search(REGEX, self.raw[pos:pos+5000])
+        logger.debug(f"Last hero byte was at offset: {pos}")
+        # Set likely start of map exploration data
+        self.map_visibility_section = pos + 538
+        self.heroes = sorted(heroes, key=lambda x: x.name.lower())
+
+    def get_map_exploration(self):
+        num_of_tiles = pow(int(self.mapdata['size']),2) * int(self.mapdata['levels'])
+        logger.debug(f"Number of tiles: {num_of_tiles}, levels: {int(self.mapdata['levels'])}")
+        i = 0
+        logger.debug(f"Tile visibility")
+        while i < num_of_tiles:
+            # Move 2 bytes for each tile
+            index = self.map_visibility_section+(i*2)
+            visibility = self.raw[index]
+            i += 1
+            bitmask_str = f"{visibility:08b}"[::-1]
+            self.map_exploration_stats.append(bitmask_str)
+            #logger.debug(f"{index:9d}: {bitmask_str}")
+
+    def find_heroes(self, *texts, **keywords):
+        """Yields heroes matching given texts and specific keywords, like skill="Luck"."""
+        for hero in self.heroes:
+            if hero.matches(*texts, **keywords): yield hero
+
+    def update_info(self, filename=None):
+        """Updates file modification and size information."""
+        filename = filename or self.filename
+        self.dt    = datetime.datetime.fromtimestamp(os.path.getmtime(filename))
+        self.size  = os.path.getsize(filename)
+        self.usize = len(self.raw)
+    def is_changed(self):
+        """Returns whether loaded contents have changed."""
+        return self.raw != self.raw0
+    def match_byte_ranges(self, positions, ranges):
+        """
+        Returns whether byte values in savefile uncompressed bytes match given ranges.
+        @param   positions  {key: byte index in savefile uncompressed bytes}
+        @param   ranges     {key in positions: (min, max)}, with negative values skipped
+        """
+        if not positions or not ranges or not all(k in positions for k in ranges): return False
+        for k, (minv, maxv) in ranges.items():
+            v = self.raw[positions[k]] if positions[k] < len(self.raw) else None
+            if v is None or (minv >= 0 and v < minv) or (maxv >= 0 and v > maxv):
+                return False
+        return True
+
+class Store(object):
+    """
+    Simple data container, allowing to store and retrieve data by subcategory and game version.
+    """
+
+    # {typename: {version: {category: {None: all, category1: filtered, ..}, ..}}}
+    DATA = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+
+    CACHE = {} # {(name, category, verdion): prepared result}
+
+    @staticmethod
+    def add(name, data, category=None, version=None):
+        stype = list if isinstance(data, tuple) else type(data)
+        store = Store.DATA[name][version].setdefault(category, stype())
+        if isinstance(store, list):
+            store.extend(x for x in copy.deepcopy(data) if x not in store)
+        elif isinstance(store, dict): store.update(copy.deepcopy(data))
+
+    @staticmethod
+    def get(name, category=None, version=None):
+        """If version is not specified, returns data from all versions."""
+        result = Store.CACHE.get((name, category, version))
+        if result is not None: return result
+
+        vv = [None, version] if version else [None] + list(Store.DATA.get(name, {}))
+        for v in sorted(set(vv), key=lambda x: x or ""):
+            r = Store.DATA.get(name, {}).get(v, {}).get(category)
+            if r is None: continue # for v
+            if result is None: result = copy.deepcopy(r)
+            elif isinstance(result, list):
+                result.extend(x for x in copy.deepcopy(r) if x not in result)
+            elif isinstance(result, dict): result.update(copy.deepcopy(r))
+        Store.CACHE[(name, category, version)] = result
+        return result
+
+
+Store.add("artifacts", ARTIFACTS)
+Store.add("artifacts", ARTIFACTS, category="inventory")
+Store.add("artifacts", ["Spellbook", "The Grail"], category="inventory")
+Store.add("artifacts", SCROLL_ARTIFACTS, category="scroll")
+for slot in set(sum(ARTIFACT_SLOTS.values(), [])):
+    Store.add("artifacts", [k for k, v in ARTIFACT_SLOTS.items() if v[0] == slot], category=slot)
+
+Store.add("artifact_slots",      ARTIFACT_SLOTS)
+Store.add("artifact_spells",     ARTIFACT_SPELLS)
+Store.add("artifact_stats",      ARTIFACT_STATS)
+Store.add("creatures",           CREATURES)
+Store.add("equipment_slots",     EQUIPMENT_SLOTS)
+Store.add("hero_byte_positions", HERO_BYTE_POSITIONS)
+Store.add("hero_ranges",         HERO_RANGES)
+Store.add("ids",                 IDS)
+Store.add("skills",              SKILLS)
+Store.add("skill_levels",        SKILL_LEVELS)
+Store.add("special_artifacts",   SPECIAL_ARTIFACTS)
+Store.add("spells",              SPELLS)
+Store.add("bannable_spells",     []) # Initialize empty array for version modules to update
+for artifact, spells in ARTIFACT_SPELLS.items():
+    Store.add("spells", spells, category=artifact)
