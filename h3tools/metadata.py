@@ -1836,9 +1836,9 @@ class Savefile(object):
         if not hasattr(self, "town_section_start"):
             self.town_section_start = None
 
-        # Build a bytes regex: (name1|name2|...)
+        # Build a bytes regex, preferring longer names so prefixes like
+        # "Forest" do not consume the start of "Forest Glen".
         name_bytes_escaped = []
-        ascii_names = []
         for n in TOWN_NAMES:
             if not n:
                 continue
@@ -1850,13 +1850,13 @@ class Savefile(object):
                     logger.debug(f"Skipping non-ASCII town name: {n!r}")
                 continue
             name_bytes_escaped.append(re.escape(nb))
-            ascii_names.append(n)
 
         if not name_bytes_escaped:
             if 'logger' in globals():
                 logger.warning("No ASCII town names available in TOWN_NAMES.")
             return
 
+        name_bytes_escaped.sort(key=len, reverse=True)
         pattern = re.compile(b"(" + b"|".join(name_bytes_escaped) + b")")
 
         seen_offsets = set()
