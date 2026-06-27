@@ -1595,7 +1595,9 @@ class Savefile(object):
         #logger.debug(f"Get player resources...")
         #self.player_resources = self.extract_player_sections(self.raw)
         logger.debug(f"Extract maptiles for map: {self.mapdata}")
-        self.maptiles = utopias.extract_tiles(self.raw, int(self.mapdata['size']), int(self.mapdata['levels']), utopias.find_tile_block_start(self.raw))
+        tile_block_start = utopias.find_tile_block_start(self.raw)
+        logger.debug(f"Detected map tile block start at offset: {tile_block_start}")
+        self.maptiles = utopias.extract_tiles(self.raw, int(self.mapdata['size']), int(self.mapdata['levels']), tile_block_start)
 
 
         #Debug - list all maptiles values:
