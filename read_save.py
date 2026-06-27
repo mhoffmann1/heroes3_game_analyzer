@@ -21,6 +21,20 @@ logger = logging.getLogger('h3_analyzer')
 #logger = logging.getLogger(__name__)
 #logging.basicConfig(filename='h3parser.log', encoding='utf-8', level=logging.DEBUG)
 
+PLAYER_COLORS = ['Red', 'Blue', 'Tan', 'Green', 'Orange', 'Purple', 'Teal', 'Pink']
+
+
+def format_player_bitmask(bitmask):
+    """Return a readable player list for an 8-bit visited-player mask."""
+    if not bitmask:
+        return "none"
+    players = [
+        color
+        for color, bit in zip(PLAYER_COLORS, str(bitmask))
+        if bit == '1'
+    ]
+    return ", ".join(players) if players else "none"
+
 
 def load_savegame(file_path):
     """Load a Heroes 3 savegame file."""
@@ -262,6 +276,14 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
             if Utopia.is_dragon_utopia(tile):
                 utopia = Utopia(idx,tile,save.mapdata['size'])
                 dragon_utopia_state.append(utopia)
+                logger.debug(
+                    "Discovered Utopia at %s, %s: visited_bitmask=%s (%s), conquered=%s",
+                    utopia.x_coord,
+                    utopia.y_coord,
+                    utopia.visited_bitmask,
+                    format_player_bitmask(utopia.visited_bitmask),
+                    utopia.conquered,
+                )
 
         game_info['total_utopias'] = len(dragon_utopia_state)
 
@@ -284,6 +306,18 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
         #Continue from here!!!
             visited_this_turn = Utopia.get_visited_players(save.maptiles[utopia.offset][1])
             conquered = Utopia.check_utopia_status(save.maptiles[utopia.offset][1])
+            logger.debug(
+                "Utopia at %s, %s state: previous visited_bitmask=%s (%s), "
+                "current visited_bitmask=%s (%s), previous conquered=%s, current conquered=%s",
+                utopia.x_coord,
+                utopia.y_coord,
+                utopia.visited_bitmask,
+                format_player_bitmask(utopia.visited_bitmask),
+                visited_this_turn,
+                format_player_bitmask(visited_this_turn),
+                utopia.conquered,
+                conquered,
+            )
             if conquered != utopia.conquered:
                 logger.info(f"Utopia at {utopia.x_coord}, {utopia.y_coord} was looted this turn.")
                 dragon_utopia_state[index].conquered = conquered
@@ -347,7 +381,7 @@ def save_to_json(data, output_file):
 def aggregate_player_data(json_data, utopia_tracker):
 
     players = {}
-    colors = ['Red', 'Blue', 'Tan', 'Green', 'Orange', 'Purple', 'Teal', 'Pink', 'None']
+    colors = PLAYER_COLORS + ['None']
 
     
     visited_utopias_summary = utopia_tracker.as_dict()
