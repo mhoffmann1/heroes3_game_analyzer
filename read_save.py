@@ -63,6 +63,13 @@ def parse_game_info(mapdata, towns):
         "player_towns": {},
         "map_size": "",
         "levels": 0,
+        "map_visibility_base": None,
+        "map_visibility_offset": None,
+        "map_visibility_section": None,
+        "map_visibility_raw_map_size": None,
+        "map_visibility_normalized_map_size": None,
+        "map_visibility_configured_offsets": None,
+        "map_visibility_metadata_file": None,
         "water": "",
         "monsters": 0,
         "expansion": "",
@@ -122,6 +129,13 @@ def parse_game_info(mapdata, towns):
         # Extract other details
         game_info["map_size"] = mapdata.get("size")
         game_info["levels"] = mapdata.get("levels")
+        game_info["map_visibility_base"] = mapdata.get("map_visibility_base")
+        game_info["map_visibility_offset"] = mapdata.get("map_visibility_offset")
+        game_info["map_visibility_section"] = mapdata.get("map_visibility_section")
+        game_info["map_visibility_raw_map_size"] = mapdata.get("map_visibility_raw_map_size")
+        game_info["map_visibility_normalized_map_size"] = mapdata.get("map_visibility_normalized_map_size")
+        game_info["map_visibility_configured_offsets"] = mapdata.get("map_visibility_configured_offsets")
+        game_info["map_visibility_metadata_file"] = mapdata.get("map_visibility_metadata_file")
         game_info["water"] = mapdata.get("water")
         game_info["monsters"] = mapdata.get("monsters")
         try:
