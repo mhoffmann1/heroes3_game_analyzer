@@ -1039,6 +1039,8 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         fog = row.get("fog_of_war")
         if not fog:
             return go.Figure()
+        fog_checksum = sum((index + 1) * int(value) for index, value in enumerate(fog))
+        visibility_offset = game_info.get("map_visibility_offset", "unknown")
 
         map_size = game_info.get("map_size", 36)
         levels = game_info.get("levels", 1)
@@ -1086,6 +1088,9 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                 ux = utop["X"]
                 uy = utop["Y"]
 
+                if not (0 <= ux < map_size and 0 <= uy < map_size):
+                    continue
+
                 # Only mark if explored
                 if level_grid[uy, ux] == 1:
                     plot_x = x_offset + (ux * scale_factor) + scale_factor / 2
@@ -1109,6 +1114,9 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                 if tlevel != i:
                     continue
                 
+                if not (0 <= tx < map_size and 0 <= ty < map_size):
+                    continue
+
                 if level_grid[ty, tx] == 1:
                     plot_x = x_offset + (tx * scale_factor) + scale_factor / 2
                     plot_y = (ty * scale_factor) + scale_factor / 2
@@ -1142,7 +1150,9 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         # === Build figure AFTER all annotations collected ===
         fig = go.Figure(data=data)
         fig.update_layout(
-            title=f"Fog of War - {player_color} - Day {selected_day}",
+            title=f"Fog of War - {player_color} - Day {selected_day} "
+                  f"(map size: {map_size}, visibility offset: {visibility_offset}, "
+                  f"fog checksum: {fog_checksum})",
             yaxis=dict(scaleanchor="x", autorange="reversed", visible=False),
             xaxis=dict(visible=False),
             annotations=annotations,
