@@ -349,16 +349,29 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
 
             tile_file_offset, current_tile, current_tile_size = save.maptiles[utopia.offset]
             if not Utopia.is_dragon_utopia(current_tile):
-                logger.warning(
-                    "Skipping Utopia at %s, %s: stored tile index %s no longer points to a Dragon Utopia "
-                    "(file offset=%s, tile_size=%s, tile_hex=%s). Map tile extraction may be misaligned.",
-                    utopia.x_coord,
-                    utopia.y_coord,
-                    utopia.offset,
-                    tile_file_offset,
-                    current_tile_size,
-                    current_tile.hex(),
-                )
+                if Utopia.is_hero(current_tile):
+                    logger.info(
+                        "Deferring Utopia at %s, %s: a hero currently occupies its map tile "
+                        "(tile index=%s, file offset=%s). Its previous state will be preserved "
+                        "until the Utopia is visible again.",
+                        utopia.x_coord,
+                        utopia.y_coord,
+                        utopia.offset,
+                        tile_file_offset,
+                    )
+                else:
+                    logger.warning(
+                        "Skipping Utopia at %s, %s: stored tile index %s unexpectedly points to "
+                        "object type 0x%02x (file offset=%s, tile_size=%s, tile_hex=%s). "
+                        "Map tile extraction may be misaligned.",
+                        utopia.x_coord,
+                        utopia.y_coord,
+                        utopia.offset,
+                        current_tile[Utopia.OBJECT_TYPE_OFFSET] if len(current_tile) > Utopia.OBJECT_TYPE_OFFSET else 0,
+                        tile_file_offset,
+                        current_tile_size,
+                        current_tile.hex(),
+                    )
                 continue
 
             visited_this_turn = Utopia.get_visited_players(current_tile)
