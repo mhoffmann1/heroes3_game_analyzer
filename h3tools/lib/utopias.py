@@ -31,6 +31,10 @@ class UtopiaTracker:
         return ', '.join(f"{player}: {count}" for player, count in self.counts.items())
 
 class Utopia():
+    OBJECT_TYPE_OFFSET = 8
+    DRAGON_UTOPIA_OBJECT_TYPE = 0x19
+    HERO_OBJECT_TYPE = 0x22
+
     def __init__(self, offset, tile, map_size):
         self.offset = offset
         self.tile = tile
@@ -76,11 +80,19 @@ class Utopia():
     @staticmethod
     def is_dragon_utopia(tile: bytes) -> bool:
         if len(tile) >= 26:
-            if tile[7] in [0x10] and tile[8] in [0x19]\
+            if tile[7] in [0x10] and tile[8] == Utopia.DRAGON_UTOPIA_OBJECT_TYPE\
             and tile[24] == 0x01 and tile[25] == 0x01:
                 return True
             else:
                 return False
+
+    @staticmethod
+    def is_hero(tile: bytes) -> bool:
+        """Return whether the map tile's top-level object is a hero."""
+        return (
+            len(tile) > Utopia.OBJECT_TYPE_OFFSET
+            and tile[Utopia.OBJECT_TYPE_OFFSET] == Utopia.HERO_OBJECT_TYPE
+        )
 
 def extract_tiles(data: bytes, map_size, levels, start_offset):
     BASE_TILE_SIZE = 22
