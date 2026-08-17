@@ -36,6 +36,13 @@ BLANK = b"\xFF"
 NULL  = b"\x00"
 
 
+"""Fallback map visibility offset from last hero byte, by map size."""
+MAP_VISIBILITY_OFFSETS = {
+    # map_size: offset_from_last_hero_byte
+}
+DEFAULT_MAP_VISIBILITY_OFFSET = 572
+
+
 """Index for various byte starts in savefile bytearray."""
 BYTE_POSITIONS = {
     "version_major":    8,  # Game major version byte
@@ -155,27 +162,13 @@ HERO_BYTE_POSITIONS = {
 
 
 """Regulax expression for finding hero struct in savefile bytes."""
-
-# Missing header for each hero:
-
-# .{2}                     #   X coordinate
-# .{2}                     #   Y coordinate
-# .{1}                     #   Z coordinate. 0 - surface, 1 - subterranean
-# .{31}
-# .{9}
-# .{3}                     #   X coordinate of destination marker
-# .{3}                     #   Y coordinate of destination marker
-# .{4}                        
-
-
-
-
 HERO_REGEX = re.compile(b"""
     # There are at least 60 bytes more at front, but those can also include
     # hero biography, making length indeterminate.
     # Bio ends at position -32 from total movement point start.
     # If bio end position is \x00, then bio is empty, otherwise bio extends back
     # until a 4-byte span giving bio length (which always ends with \x00).
+
     .{4}                     #   4 bytes: movement points in total             000-003
     .{4}                     #   4 bytes: movement points remaining            004-007
     .{4}                     #   4 bytes: experience                           008-011
@@ -1565,6 +1558,7 @@ class Savefile(object):
         self.dt       = None
         self.mapdata  = {}
         self.map_visibility_section = 0
+        self.map_visibility_base = 0
         self.map_exploration_stats = []
         self.size     = 0
         self.usize    = 0
@@ -1609,7 +1603,9 @@ class Savefile(object):
         #logger.debug(f"Get player resources...")
         #self.player_resources = self.extract_player_sections(self.raw)
         logger.debug(f"Extract maptiles for map: {self.mapdata}")
-        self.maptiles = utopias.extract_tiles(self.raw, int(self.mapdata['size']), int(self.mapdata['levels']), utopias.find_tile_block_start(self.raw))
+        tile_block_start = utopias.find_tile_block_start(self.raw)
+        logger.debug(f"Detected map tile block start at offset: {tile_block_start}")
+        self.maptiles = utopias.extract_tiles(self.raw, int(self.mapdata['size']), int(self.mapdata['levels']), tile_block_start)
 
 
         #Debug - list all maptiles values:
@@ -1657,6 +1653,16 @@ class Savefile(object):
         #    fogofwar.join(str(bitmask[player]))
         #logger.debug(f"bitmask fogofwarjoned:{fogofwar}")
         return fogofwar
+
+    def log_map_visibility_offset(self, label):
+        """Log current map visibility offset as absolute byte and base-relative constant."""
+        relative = self.map_visibility_section - self.map_visibility_base if self.map_visibility_base else None
+        logger.debug(
+            "Map visibility offset [%s]: absolute=%s, relative_to_last_hero=%s.",
+            label,
+            self.map_visibility_section,
+            relative,
+        )
 
     #def write(self, filename=None):
     #    """Writes out gzipped file."""
@@ -1850,9 +1856,9 @@ class Savefile(object):
         if not hasattr(self, "town_section_start"):
             self.town_section_start = None
 
-        # Build a bytes regex: (name1|name2|...)
+        # Build a bytes regex, preferring longer names so prefixes like
+        # "Forest" do not consume the start of "Forest Glen".
         name_bytes_escaped = []
-        ascii_names = []
         for n in TOWN_NAMES:
             if not n:
                 continue
@@ -1864,13 +1870,13 @@ class Savefile(object):
                     logger.debug(f"Skipping non-ASCII town name: {n!r}")
                 continue
             name_bytes_escaped.append(re.escape(nb))
-            ascii_names.append(n)
 
         if not name_bytes_escaped:
             if 'logger' in globals():
                 logger.warning("No ASCII town names available in TOWN_NAMES.")
             return
 
+        name_bytes_escaped.sort(key=len, reverse=True)
         pattern = re.compile(b"(" + b"|".join(name_bytes_escaped) + b")")
 
         seen_offsets = set()
@@ -1977,10 +1983,12 @@ class Savefile(object):
         for hero in self.heroes: hero.parse()
 
     def parse_xyz_from_hero_header(self, header: bytes):
-        x1 = int.from_bytes(header[0:2], "big")
-        y1 = int.from_bytes(header[2:4], "big")
-        z  = int.from_bytes(header[4:6], "big")
-        return {"x": x1, "y": y1, "z": z}
+        """Return adventure-map coordinates stored in a hero record header."""
+        return {
+            "x": int.from_bytes(header[0:2], "big"),
+            "y": int.from_bytes(header[2:4], "big"),
+            "z": int.from_bytes(header[4:6], "big"),
+        }
 
     def populate_heroes(self):
         heroes = []
@@ -1998,17 +2006,11 @@ class Savefile(object):
                 hero.set_file_data(blob, len(heroes), (start + pos, end + pos))  # Pass self.raw
                 
                 #print(f"Found hero: {name} at offset: {pos+start-63} to {pos+end}")
-                header = bytearray(self.raw[pos + start-58:pos + start])
-                #if hero.name == "Cyra":
-                #    print(f"Hero {hero.name} header section\n:{header}")
                 fullblob = bytearray(self.raw[pos + start-63:pos + end])
                 ownership_byte = fullblob[0x20] if len(fullblob) > 0x20 else 255
                 hero.set_owner(ownership_byte)
+                header = bytearray(self.raw[pos + start-58:pos + start])
                 hero.coords = self.parse_xyz_from_hero_header(header)
-
-                #if hero.coords["y"] != 65535:
-                #    print(f"{hero.name} coords: {hero.coords}")
-
                 #print(f"Ownership byte (0x20): 0x{ownership_byte:02X} ({ownership_byte})")
                 #print(f"Player: {hero.owner}")
                 heroes.append(hero)
@@ -2018,12 +2020,42 @@ class Savefile(object):
             m = re.search(REGEX, self.raw[pos:pos+5000])
         logger.debug(f"Last hero byte was at offset: {pos}")
         # Set likely start of map exploration data
-        self.map_visibility_section = pos + 538
+        self.map_visibility_base = pos
+        raw_map_size = self.mapdata.get("size")
+        try:
+            map_size = int(raw_map_size)
+        except (TypeError, ValueError):
+            map_size = raw_map_size
+        visibility_offset = MAP_VISIBILITY_OFFSETS.get(
+            map_size,
+            MAP_VISIBILITY_OFFSETS.get(str(raw_map_size), DEFAULT_MAP_VISIBILITY_OFFSET)
+        )
+        logger.debug(
+            "Using map visibility offset %s for raw map size %r / normalized %r "
+            "(default=%s, configured=%s, metadata_file=%s).",
+            visibility_offset,
+            raw_map_size,
+            map_size,
+            DEFAULT_MAP_VISIBILITY_OFFSET,
+            MAP_VISIBILITY_OFFSETS,
+            __file__,
+        )
+        self.map_visibility_section = pos + visibility_offset
+        self.mapdata["map_visibility_base"] = self.map_visibility_base
+        self.mapdata["map_visibility_offset"] = visibility_offset
+        self.mapdata["map_visibility_section"] = self.map_visibility_section
+        self.mapdata["map_visibility_raw_map_size"] = raw_map_size
+        self.mapdata["map_visibility_normalized_map_size"] = map_size
+        self.mapdata["map_visibility_configured_offsets"] = dict(MAP_VISIBILITY_OFFSETS)
+        self.mapdata["map_visibility_metadata_file"] = __file__
+        self.log_map_visibility_offset("initial guess")
         self.heroes = sorted(heroes, key=lambda x: x.name.lower())
 
     def get_map_exploration(self):
         num_of_tiles = pow(int(self.mapdata['size']),2) * int(self.mapdata['levels'])
         logger.debug(f"Number of tiles: {num_of_tiles}, levels: {int(self.mapdata['levels'])}")
+        self.log_map_visibility_offset("manual")
+        self.map_exploration_stats = []
         i = 0
         logger.debug(f"Tile visibility")
         while i < num_of_tiles:

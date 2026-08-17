@@ -339,7 +339,7 @@ class Hero(object):
         ## Owner
         self.owner = None
 
-        ## Coords
+        ## Adventure-map coordinates
         self.coords = {}
 
         ## All properties in one structure

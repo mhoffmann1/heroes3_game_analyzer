@@ -5,7 +5,7 @@
 To decompress single save for manual analysys:
 
 ```bash
-python decompress_gm.py saves/red_3cities.GM2 -o saves/red_3cities.bin
+python decompress_gm.py saves/red_3cities.GM2 --output-bin saves/red_3cities.bin
 python3.10 read_save.py /mnt/c/Users/hoffm/local_games/HoMM\ 3\ Complete/games/HotA\ Random/addy1986/2025.10.28\ 20\;45\ kerberos_x3_adv/ --output Addy_Marcin_kerbos
 ```
 
