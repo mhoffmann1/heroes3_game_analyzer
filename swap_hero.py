@@ -247,6 +247,185 @@ def _patch_owner_and_coords(
     return owner_offset, coord_offset
 
 
+def _get_hero_coords(raw: bytearray, hero_span: HeroSpan) -> Tuple[int, int, int]:
+    """Read the primary map coordinates from a hero's 63-byte preamble."""
+    header_start = hero_span.start + 5
+    return tuple(
+        int.from_bytes(raw[header_start + offset:header_start + offset + 2], "big")
+        for offset in (0, 2, 4)
+    )
+
+
+def _find_source_hero_object_id(save, hero_span: HeroSpan) -> int:
+    """Find the hero object ID stored in the source adventure-map tile."""
+    x, y, z = _get_hero_coords(save.raw, hero_span)
+    map_size = int(save.mapdata.get("size") or 0)
+    levels = int(save.mapdata.get("levels") or 0)
+    if not (0 <= x < map_size and 0 <= y < map_size and 0 <= z < levels):
+        raise ValueError(
+            f"Hero '{hero_span.name}' is not active on the source map: "
+            f"coordinates are ({x},{y},{z})."
+        )
+
+    # Most saves place the map object at the hero coordinates. Some hero
+    # orientations use the neighbouring visual anchor, so check those too.
+    candidates = ((x, y), (x - 1, y), (x, y - 1), (x - 1, y - 1))
+    for tile_x, tile_y in candidates:
+        if not (0 <= tile_x < map_size and 0 <= tile_y < map_size):
+            continue
+        tile_index = z * map_size * map_size + tile_y * map_size + tile_x
+        _, tile, _ = save.maptiles[tile_index]
+        if len(tile) >= 18 and tile[8] == 0x22:
+            return int.from_bytes(tile[14:18], "little")
+
+    raise ValueError(
+        f"Could not find the source map object for hero '{hero_span.name}' "
+        f"near ({x},{y},{z})."
+    )
+
+
+def _place_hero_map_object(
+    save,
+    raw: bytearray,
+    hero_name: str,
+    hero_object_id: int,
+    x: int,
+    y: int,
+    z: int,
+) -> Tuple[int, int]:
+    """Create a fixed-size Hero object on an otherwise empty target map tile."""
+    map_size = int(save.mapdata.get("size") or 0)
+    levels = int(save.mapdata.get("levels") or 0)
+    if not (0 <= x < map_size and 0 <= y < map_size and 0 <= z < levels):
+        raise ValueError(
+            f"Target coordinates out of bounds for map {map_size}x{map_size} "
+            f"with {levels} level(s): ({x},{y},{z})."
+        )
+
+    tile_index = z * map_size * map_size + y * map_size + x
+    tile_offset, tile, tile_size = save.maptiles[tile_index]
+    if tile_size != 22 or len(tile) != 22:
+        raise ValueError(
+            f"Cannot place '{hero_name}' at ({x},{y},{z}): target tile has "
+            f"variable size {tile_size}; refusing to resize the map tile block."
+        )
+    if tile[8] != 0x00:
+        raise ValueError(
+            f"Cannot place '{hero_name}' at ({x},{y},{z}): target tile already "
+            f"contains object type 0x{tile[8]:02x}."
+        )
+
+    patched = bytearray(tile)
+    patched[7] |= 0x10             # Adventure-map object present.
+    patched[8] = 0x22              # Hero object type.
+    patched[9] = 0x00
+    patched[10:14] = b"\xff" * 4
+    patched[14:18] = int(hero_object_id).to_bytes(4, "little")
+    patched[18:22] = b"\x00" * 4  # No additional object definitions.
+    raw[tile_offset:tile_offset + tile_size] = patched
+    return tile_index, tile_offset
+
+
+ACTIVE_HERO_TABLE_SUFFIX = bytes.fromhex(
+    "00000000ffffffff00000000010000000800000000060000000000ffffffff0064"
+)
+
+
+def _find_active_hero_table(raw: bytearray) -> Tuple[int, int]:
+    """Locate HoTA's counted table of 20-byte active-hero instance records."""
+    raw_bytes = bytes(raw)
+    suffix_starts = []
+    search_from = 0
+    while True:
+        suffix_start = raw_bytes.find(ACTIVE_HERO_TABLE_SUFFIX[:16], search_from)
+        if suffix_start < 0:
+            break
+        suffix_end = suffix_start + len(ACTIVE_HERO_TABLE_SUFFIX)
+        candidate = raw_bytes[suffix_start:suffix_end]
+        if (
+            len(candidate) == len(ACTIVE_HERO_TABLE_SUFFIX)
+            and candidate[17:21] == ACTIVE_HERO_TABLE_SUFFIX[17:21]
+            and candidate[22:] == ACTIVE_HERO_TABLE_SUFFIX[22:]
+        ):
+            # Bytes 16 and 21 vary with map/player configuration.
+            suffix_starts.append(suffix_start)
+        search_from = suffix_start + 1
+
+    if not suffix_starts:
+        raise ValueError("Could not locate the active-hero table suffix in the target save.")
+
+    candidates = []
+    for suffix_start in suffix_starts:
+        for count in range(65):
+            table_offset = suffix_start - 4 - count * 20
+            if table_offset < 0:
+                continue
+            if int.from_bytes(raw[table_offset:table_offset + 4], "little") != count:
+                continue
+            records = [
+                raw[table_offset + 4 + index * 20:table_offset + 24 + index * 20]
+                for index in range(count)
+            ]
+            if all(len(record) == 20 and record[0] == 0x09 and record[1] < 8 for record in records):
+                candidates.append((table_offset, count))
+
+    if not candidates:
+        raise ValueError(
+            "Could not find a valid counted active-hero table before its suffix."
+        )
+
+    # A record ends with four zero bytes.  Once the table contains a hero,
+    # those bytes also look like a valid empty-table count immediately before
+    # the suffix.  The real table is therefore the valid candidate containing
+    # the greatest number of complete records.
+    largest_count = max(count for _, count in candidates)
+    largest = [candidate for candidate in candidates if candidate[1] == largest_count]
+    if len(largest) != 1:
+        raise ValueError(
+            f"Active-hero table is ambiguous: found {len(largest)} valid "
+            f"candidates with {largest_count} record(s)."
+        )
+    return largest[0]
+
+
+def _register_active_hero(
+    raw: bytearray,
+    hero_object_id: int,
+    owner_byte: int,
+    x: int,
+    y: int,
+    z: int,
+) -> Tuple[int, int]:
+    """Append a confirmed HoTA 1.8 active-hero instance record."""
+    if z != 0:
+        raise ValueError("Active-hero records for underground placement are not yet understood.")
+    if not 0 <= owner_byte < 8:
+        raise ValueError("An active hero must have one of the eight player owners.")
+    if not 0 <= hero_object_id <= 0xFF:
+        raise ValueError("Hero object ID does not fit the HoTA active-hero record.")
+
+    table_offset, count = _find_active_hero_table(raw)
+    records_end = table_offset + 4 + count * 20
+    existing_ids = {
+        raw[table_offset + 4 + index * 20 + 2]
+        for index in range(count)
+    }
+    if hero_object_id in existing_ids:
+        raise ValueError(f"Hero object ID {hero_object_id} is already active in the target save.")
+
+    record = (
+        bytes((0x09, owner_byte, hero_object_id))
+        + b"\x00\x00\x00"
+        + bytes((owner_byte, 0xFF))
+        + int(x).to_bytes(2, "little")
+        + int(y).to_bytes(2, "little")
+        + bytes.fromhex("ff03ff3f00000000")
+    )
+    raw[table_offset:table_offset + 4] = (count + 1).to_bytes(4, "little")
+    raw[records_end:records_end] = record
+    return table_offset, records_end
+
+
 
 def swap_hero(
     input_path: str,
@@ -267,6 +446,8 @@ def swap_hero(
 
     in_span = _get_hero_full_span(in_save, hero_name)
     out_span = _get_hero_full_span(out_save, hero_name)
+
+    source_hero_object_id = _find_source_hero_object_id(in_save, in_span)
 
     if in_span.length != out_span.length:
         raise ValueError(
@@ -297,6 +478,28 @@ def swap_hero(
         map_size=map_size,
     )
 
+    map_tile = None
+    registry_entry = None
+    if set_x is not None and set_y is not None and set_z is not None:
+        map_tile = _place_hero_map_object(
+            out_save,
+            out_raw,
+            hero_name=in_span.name,
+            hero_object_id=source_hero_object_id,
+            x=set_x,
+            y=set_y,
+            z=set_z,
+        )
+        effective_owner = owner_byte if owner_byte is not None else out_raw[out_span.start + 0x20]
+        registry_entry = _register_active_hero(
+            out_raw,
+            hero_object_id=source_hero_object_id,
+            owner_byte=effective_owner,
+            x=set_x,
+            y=set_y,
+            z=set_z,
+        )
+
     _write_gzip_bytes(out_path, out_raw)
 
     msg = [
@@ -307,6 +510,18 @@ def swap_hero(
         msg.append(f"Patched owner at 0x{owner_off:X} to {owner_byte}")
     if coord_off is not None:
         msg.append(f"Patched coords at 0x{coord_off:X} to ({set_x},{set_y},{set_z})")
+    if map_tile is not None:
+        tile_index, tile_offset = map_tile
+        msg.append(
+            f"Created hero map object ID {source_hero_object_id} at tile index "
+            f"{tile_index} (0x{tile_offset:X})"
+        )
+    if registry_entry is not None:
+        registry_offset, entry_offset = registry_entry
+        msg.append(
+            f"Registered active hero at table 0x{registry_offset:X}; "
+            f"inserted 20-byte instance record at 0x{entry_offset:X}"
+        )
 
     print("\n".join(msg))
 
