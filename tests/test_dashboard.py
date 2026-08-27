@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from dashboard import get_top_heroes_by_army_strength
+from dashboard import build_player_summary_rankings, get_top_heroes_by_army_strength
 
 
 class HeroMetricDefaultsTests(unittest.TestCase):
@@ -41,6 +41,56 @@ class HeroMetricDefaultsTests(unittest.TestCase):
         ])
 
         self.assertEqual([], get_top_heroes_by_army_strength(heroes, []))
+
+
+class PlayerSummaryRankingsTests(unittest.TestCase):
+    def test_builds_requested_totals_and_orders_players(self):
+        players = pd.DataFrame([
+            {
+                "day": 4, "player_color": "Red", "town_count": 2,
+                "wood": 10, "ore": 15, "gems": 1, "crystal": 2,
+                "sulfur": 3, "mercury": 4, "gold": 5000,
+                "visited_utopias": 1, "total_army_strength": 900,
+                "tiles_explored": 120,
+            },
+            {
+                "day": 4, "player_color": "Blue", "town_count": 3,
+                "wood": 20, "ore": 20, "gems": 2, "crystal": 3,
+                "sulfur": 4, "mercury": 5, "gold": 4000,
+                "visited_utopias": 2, "total_army_strength": 800,
+                "tiles_explored": 150,
+            },
+            {
+                "day": 4, "player_color": "None", "town_count": 10,
+                "gold": 99999,
+            },
+        ])
+        heroes = pd.DataFrame([
+            {"day": 4, "player_color": "Red", "hero_name": "Gelu"},
+            {"day": 4, "player_color": "Red", "hero_name": "Kyrre"},
+            {"day": 4, "player_color": "Blue", "hero_name": "Solmyr"},
+            {"day": 4, "player_color": "None", "hero_name": "Neutral"},
+        ])
+
+        rankings = build_player_summary_rankings(players, heroes, 4)
+        by_key = {ranking["key"]: ranking for ranking in rankings}
+
+        self.assertEqual(
+            ["Blue", "Red"],
+            [entry["player"] for entry in by_key["town_count"]["entries"]],
+        )
+        self.assertEqual(
+            [40, 25],
+            [entry["value"] for entry in by_key["wood_and_ore"]["entries"]],
+        )
+        self.assertEqual(
+            [14, 10],
+            [entry["value"] for entry in by_key["rare_resources"]["entries"]],
+        )
+        self.assertEqual(
+            [2, 1],
+            [entry["value"] for entry in by_key["heroes_controlled"]["entries"]],
+        )
 
 
 if __name__ == "__main__":
