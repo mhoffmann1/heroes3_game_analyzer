@@ -208,12 +208,54 @@ def parse_day_from_filename(filename):
     return None
 
 
+def get_top_heroes_by_army_strength(df_heroes, selected_players, limit=3):
+    """Return up to `limit` strongest heroes per player on their latest day."""
+    if df_heroes.empty or not selected_players or limit <= 0:
+        return []
+
+    filtered = df_heroes[
+        df_heroes["player_color"].isin(selected_players)
+    ].copy()
+    if filtered.empty:
+        return []
+
+    filtered["army_strength"] = pd.to_numeric(
+        filtered["army_strength"], errors="coerce"
+    ).fillna(0)
+    latest = (
+        filtered.sort_values("day", na_position="first")
+        .groupby(["player_color", "hero_name"], as_index=False, sort=False)
+        .tail(1)
+    )
+
+    selected = []
+    for player in selected_players:
+        strongest = (
+            latest[latest["player_color"] == player]
+            .sort_values(
+                ["army_strength", "hero_name"],
+                ascending=[False, True],
+                kind="stable",
+            )
+            .head(limit)
+        )
+        selected.extend(strongest["hero_name"].tolist())
+
+    # Hero names are the dropdown values, so avoid duplicates if a hero changed
+    # owner during the game.
+    return list(dict.fromkeys(selected))
+
+
 def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, df_utopias, port):
     app = dash.Dash(__name__)
     server = app.server
 
     player_options = sorted(df_heroes["player_color"].dropna().unique())
     hero_options = sorted(df_heroes["hero_name"].dropna().unique())
+    default_players = [player for player in player_options if player != "None"]
+    default_heroes = get_top_heroes_by_army_strength(
+        df_heroes, default_players, limit=3
+    )
     metric_options = ["experience", "army_strength", "army_hitpoints", "attack", "defense", "power", "knowledge"]
     player_metric_options = ["gold", "town_count", "total_army_strength", "total_hero_army_strength", 
                              "total_garrison_army_strength", "total_army_hitpoints", "visited_utopias",
@@ -272,7 +314,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             dcc.Dropdown(
                 id="player_selector",
                 options=[{"label": p, "value": p} for p in player_options],
-                value=player_options,
+                value=default_players,
                 multi=True
             ),
 
@@ -280,7 +322,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             dcc.Dropdown(
                 id="hero_selector",
                 options=[{"label": h, "value": h} for h in hero_options],
-                value=hero_options,
+                value=default_heroes,
                 multi=True
             ),
 
@@ -508,13 +550,19 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
     @app.callback(
         Output("hero_selector", "options"),
         Output("hero_selector", "value"),
-        Input("player_selector", "value")
+        Input("player_selector", "value"),
+        State("hero_selector", "value")
     )
-    def update_hero_selector(selected_players):
+    def update_hero_selector(selected_players, selected_heroes):
+        selected_players = selected_players or []
         filtered = df_heroes[df_heroes["player_color"].isin(selected_players)]
         heroes = sorted(filtered["hero_name"].dropna().unique())
         options = [{"label": h, "value": h} for h in heroes]
-        return options, heroes
+        valid_heroes = set(heroes)
+        retained_selection = [
+            hero for hero in (selected_heroes or []) if hero in valid_heroes
+        ]
+        return options, retained_selection
 
     # Update line chart for heroes
     @app.callback(
@@ -536,18 +584,29 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
 
         for metric in selected_metrics:
             for (player, hero), group in filtered.groupby(["player_color", "hero_name"]):
+                player_color = PLAYER_COLORS.get(player, "#808080")
+                metric_label = metric.replace("_", " ").title()
                 fig.add_trace(go.Scatter(
                     x=group["day"],
                     y=group[metric],
                     mode="lines+markers",
-                    name=f"{hero} ({player}) - {metric.capitalize()}"
+                    name=f"{hero} ({player}) - {metric.capitalize()}",
+                    line={"color": player_color},
+                    marker={"color": player_color},
+                    hovertemplate=(
+                        f"<b>{hero}</b><br>"
+                        f"Player: {player}<br>"
+                        "Day: %{x}<br>"
+                        f"{metric_label}: %{{y:,}}"
+                        "<extra></extra>"
+                    ),
                 ))
 
         fig.update_layout(
             title="Hero Progress Over Time",
             xaxis_title="Game Day",
             yaxis_title="Value",
-            hovermode="x unified"
+            hovermode="closest"
         )
         return fig
 
