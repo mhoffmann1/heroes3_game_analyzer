@@ -9,11 +9,61 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import State, dash_table, dcc, html
+import plotly.io as pio
+from dash import State, dcc, html
 from dash.dependencies import Input, Output
 from plotly.subplots import make_subplots
 
 logger = logging.getLogger(__package__)
+
+
+def configure_homm3_plotly_theme():
+    """Install the shared parchment-and-gold chart theme."""
+    pio.templates["homm3"] = go.layout.Template(layout={
+        "font": {
+            "family": "Georgia, 'Palatino Linotype', 'Book Antiqua', serif",
+            "color": "#2d261c",
+            "size": 13,
+        },
+        "title": {
+            "font": {"color": "#392d1c", "size": 22},
+            "x": 0.03,
+            "xanchor": "left",
+        },
+        "paper_bgcolor": "rgba(250, 244, 224, 0.96)",
+        "plot_bgcolor": "rgba(255, 252, 239, 0.92)",
+        "colorway": [
+            "#9f1d20", "#244d9b", "#b08a58", "#2f7d3b",
+            "#c76b20", "#6f3b88", "#177d7b", "#bd5577",
+        ],
+        "hoverlabel": {
+            "bgcolor": "#fff8df",
+            "bordercolor": "#9a742c",
+            "font": {"color": "#241d14", "family": "Georgia, serif"},
+        },
+        "legend": {
+            "bgcolor": "rgba(255, 249, 229, 0.86)",
+            "bordercolor": "#b99a5b",
+            "borderwidth": 1,
+            "font": {"color": "#33291d"},
+        },
+        "xaxis": {
+            "gridcolor": "rgba(114, 88, 48, 0.16)",
+            "linecolor": "#917343",
+            "zerolinecolor": "rgba(114, 88, 48, 0.28)",
+            "tickcolor": "#917343",
+            "title": {"font": {"color": "#493a27"}},
+        },
+        "yaxis": {
+            "gridcolor": "rgba(114, 88, 48, 0.16)",
+            "linecolor": "#917343",
+            "zerolinecolor": "rgba(114, 88, 48, 0.28)",
+            "tickcolor": "#917343",
+            "title": {"font": {"color": "#493a27"}},
+        },
+        "margin": {"l": 70, "r": 35, "t": 70, "b": 60},
+    })
+    pio.templates.default = "homm3"
 
 
 
@@ -208,12 +258,357 @@ def parse_day_from_filename(filename):
     return None
 
 
+def format_game_info_value(key, value):
+    """Format raw game metadata for compact dashboard summary cards."""
+    if value is None or value == "":
+        return "—"
+    if key == "map_size":
+        return f"{value} × {value}"
+    if isinstance(value, dict):
+        if not value:
+            return "None"
+        return " • ".join(
+            f"{str(name).capitalize()}: {item}" for name, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(map(str, value)) if value else "None"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    return str(value)
+
+
+def get_top_heroes_by_army_strength(df_heroes, selected_players, limit=3):
+    """Return up to `limit` strongest heroes per player on their latest day."""
+    if df_heroes.empty or not selected_players or limit <= 0:
+        return []
+
+    filtered = df_heroes[
+        df_heroes["player_color"].isin(selected_players)
+    ].copy()
+    if filtered.empty:
+        return []
+
+    filtered["army_strength"] = pd.to_numeric(
+        filtered["army_strength"], errors="coerce"
+    ).fillna(0)
+    latest = (
+        filtered.sort_values("day", na_position="first")
+        .groupby(["player_color", "hero_name"], as_index=False, sort=False)
+        .tail(1)
+    )
+
+    selected = []
+    for player in selected_players:
+        strongest = (
+            latest[latest["player_color"] == player]
+            .sort_values(
+                ["army_strength", "hero_name"],
+                ascending=[False, True],
+                kind="stable",
+            )
+            .head(limit)
+        )
+        selected.extend(strongest["hero_name"].tolist())
+
+    # Hero names are the dropdown values, so avoid duplicates if a hero changed
+    # owner during the game.
+    return list(dict.fromkeys(selected))
+
+
+def build_player_summary_rankings(df_players, df_heroes, selected_day):
+    """Build descending player rankings for the requested day."""
+    if df_players.empty or selected_day is None:
+        return []
+
+    current = df_players[
+        (df_players["day"] == selected_day)
+        & (df_players["player_color"] != "None")
+    ].copy()
+    if current.empty:
+        return []
+
+    current = current.drop_duplicates("player_color", keep="last")
+    hero_counts = (
+        df_heroes[
+            (df_heroes["day"] == selected_day)
+            & (df_heroes["player_color"] != "None")
+        ]
+        .groupby("player_color")["hero_name"]
+        .nunique()
+    )
+    current["heroes_controlled"] = (
+        current["player_color"].map(hero_counts).fillna(0)
+    )
+
+    heroes_today = df_heroes[
+        (df_heroes["day"] == selected_day)
+        & (df_heroes["player_color"] != "None")
+    ].copy()
+    if "army_strength" not in heroes_today:
+        heroes_today["army_strength"] = 0
+    heroes_today["army_strength"] = pd.to_numeric(
+        heroes_today["army_strength"], errors="coerce"
+    ).fillna(0)
+    strongest_heroes = (
+        heroes_today.sort_values(
+            ["army_strength", "hero_name"],
+            ascending=[False, True],
+            kind="stable",
+        )
+        .drop_duplicates("player_color", keep="first")
+        .set_index("player_color")
+    )
+    current["strongest_hero"] = current["player_color"].map(
+        strongest_heroes["hero_name"]
+    ).fillna("—")
+    current["strongest_hero_strength"] = current["player_color"].map(
+        strongest_heroes["army_strength"]
+    ).fillna(0)
+
+    # Match "Spell Availability Over Time": access is cumulative, so once a
+    # player has had one of these spells it remains unlocked on later days.
+    spell_history = df_heroes[
+        (df_heroes["day"] <= selected_day)
+        & (df_heroes["player_color"] != "None")
+    ].copy()
+    spell_columns = {
+        "has_dd": "Dimension Door",
+        "has_tp": "Town Portal",
+        "has_fly": "Fly",
+    }
+    for column in spell_columns:
+        if column not in spell_history:
+            spell_history[column] = False
+        spell_history[column] = spell_history[column].map(
+            lambda value: (
+                value is True
+                or value == 1
+                or (isinstance(value, str) and value.lower() == "true")
+            )
+        )
+    spell_access = spell_history.groupby("player_color")[list(spell_columns)].max()
+    current["adventure_spells"] = current["player_color"].map(
+        spell_access.sum(axis=1)
+    ).fillna(0)
+    current["adventure_spell_names"] = current["player_color"].map(
+        spell_access.apply(
+            lambda row: [
+                label for column, label in spell_columns.items() if row[column]
+            ],
+            axis=1,
+        )
+    ).apply(lambda value: value if isinstance(value, list) else [])
+
+    numeric_columns = [
+        "town_count", "wood", "ore", "gems", "crystal", "sulfur",
+        "mercury", "gold", "visited_utopias", "total_army_strength",
+        "tiles_explored", "heroes_controlled",
+        "strongest_hero_strength",
+        "adventure_spells",
+    ]
+    for column in numeric_columns:
+        if column not in current:
+            current[column] = 0
+        current[column] = pd.to_numeric(current[column], errors="coerce").fillna(0)
+
+    current["wood_and_ore"] = current["wood"] + current["ore"]
+    current["rare_resources"] = (
+        current["gems"] + current["crystal"]
+        + current["sulfur"] + current["mercury"]
+    )
+
+    categories = [
+        ("heroes_controlled", "Heroes controlled", "Military"),
+        ("strongest_hero_strength", "Strongest hero", "Military"),
+        ("total_army_strength", "Total army strength", "Military"),
+        ("town_count", "Towns controlled", "Map control"),
+        ("visited_utopias", "Utopias visited", "Map control"),
+        ("tiles_explored", "Map tiles discovered", "Map control"),
+        ("adventure_spells", "Adventure spells", "Map control"),
+        ("wood_and_ore", "Wood & ore", "Economic"),
+        ("rare_resources", "Gems, crystals, sulfur & mercury", "Economic"),
+        ("gold", "Gold", "Economic"),
+    ]
+    player_order = {
+        player: index for index, player in enumerate(
+            ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink"]
+        )
+    }
+
+    rankings = []
+    for key, label, group in categories:
+        entries = [
+            {
+                "player": row.player_color,
+                "value": row_value,
+                "hero": row.strongest_hero if key == "strongest_hero_strength" else None,
+                "spells": row.adventure_spell_names if key == "adventure_spells" else None,
+            }
+            for row in current.itertuples(index=False)
+            for row_value in [getattr(row, key)]
+        ]
+        entries.sort(
+            key=lambda entry: (
+                -entry["value"],
+                player_order.get(entry["player"], len(player_order)),
+            )
+        )
+        rankings.append({
+            "key": key,
+            "label": label,
+            "group": group,
+            "entries": entries,
+        })
+
+    return rankings
+
+
+def build_player_power_scores(rankings):
+    """Award placement points and return category and overall player scores."""
+    if not rankings:
+        return []
+
+    players = list(dict.fromkeys(
+        entry["player"]
+        for ranking in rankings
+        for entry in ranking["entries"]
+    ))
+    scores = {
+        player: {
+            "player": player,
+            "Military": 0,
+            "Map control": 0,
+            "Economic": 0,
+            "total": 0,
+        }
+        for player in players
+    }
+
+    for ranking in rankings:
+        if ranking["key"] == "adventure_spells":
+            for entry in ranking["entries"]:
+                points = int(entry["value"]) * 5
+                scores[entry["player"]][ranking["group"]] += points
+                scores[entry["player"]]["total"] += points
+            continue
+
+        player_count = len(ranking["entries"])
+        previous_value = None
+        previous_points = None
+        for position, entry in enumerate(ranking["entries"], start=1):
+            if previous_value is not None and entry["value"] == previous_value:
+                points = previous_points
+            else:
+                points = max(player_count - position + 1, 1)
+            scores[entry["player"]][ranking["group"]] += points
+            scores[entry["player"]]["total"] += points
+            previous_value = entry["value"]
+            previous_points = points
+
+    player_order = {
+        player: index for index, player in enumerate(
+            ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink"]
+        )
+    }
+    return sorted(
+        scores.values(),
+        key=lambda score: (
+            -score["total"],
+            player_order.get(score["player"], len(player_order)),
+        ),
+    )
+
+
 def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, df_utopias, port):
+    configure_homm3_plotly_theme()
     app = dash.Dash(__name__)
     server = app.server
 
     player_options = sorted(df_heroes["player_color"].dropna().unique())
     hero_options = sorted(df_heroes["hero_name"].dropna().unique())
+    default_players = [player for player in player_options if player != "None"]
+    default_heroes = get_top_heroes_by_army_strength(
+        df_heroes, default_players, limit=3
+    )
+    default_army_heroes = get_top_heroes_by_army_strength(
+        df_heroes, default_players, limit=1
+    )
+    summary_days = sorted(df_players["day"].dropna().unique())
+    optional_game_info_keys = {"total_utopias", "total_towns"}
+    hidden_game_info_keys = {
+        "map_visibility_base",
+        "map_visibility_offset",
+        "map_visibility_section",
+        "map_visibility_raw_map_size",
+        "map_visibility_normalized_map_size",
+        "map_visibility_configured_offsets",
+        "map_visibility_metadata_file",
+    }
+    game_info_labels = {
+        "map_name": "Map",
+        "player_names": "Human players",
+        "game_date": "Game date",
+        "template": "Template",
+        "human_players": "Human player count",
+        "computer_players": "Computer player count",
+        "player_towns": "Starting towns",
+        "map_size": "Map size",
+        "levels": "Map levels",
+        "water": "Water",
+        "monsters": "Monster strength",
+        "expansion": "Game version",
+        "total_utopias": "Dragon Utopias",
+        "total_towns": "Towns",
+    }
+    game_info_icons = {
+        "map_name": "🗺️", "player_names": "👥", "game_date": "📅",
+        "template": "🧩", "human_players": "🧑", "computer_players": "🤖",
+        "player_towns": "🏰", "map_size": "📐", "levels": "🌍",
+        "water": "🌊", "monsters": "👹", "expansion": "⚙️",
+        "total_utopias": "🐉", "total_towns": "🏘️",
+    }
+
+    def game_info_card(key, value, optional=False):
+        label = game_info_labels.get(key, key.replace("_", " ").title())
+        return html.Div([
+            html.Div([
+                html.Span(game_info_icons.get(key, "ℹ️"), style={"fontSize": "20px"}),
+                html.Span(label, style={
+                    "fontSize": "12px",
+                    "fontWeight": "700",
+                    "textTransform": "uppercase",
+                    "letterSpacing": "0.05em",
+                    "color": "#687386",
+                }),
+            ], style={"display": "flex", "alignItems": "center", "gap": "8px"}),
+            html.Div(
+                format_game_info_value(key, value),
+                style={
+                    "marginTop": "8px",
+                    "fontSize": "16px" if not optional else "22px",
+                    "fontWeight": "750",
+                    "color": "#263445",
+                    "overflowWrap": "anywhere",
+                },
+            ),
+        ], style={
+            "padding": "14px 16px",
+            "borderRadius": "11px",
+            "backgroundColor": "white",
+            "border": "1px solid #dfe6ee",
+            "boxShadow": "0 2px 8px rgba(31, 45, 61, 0.07)",
+        })
+
+    primary_game_info_cards = [
+        game_info_card(key, value)
+        for key, value in game_info.items()
+        if key not in optional_game_info_keys | hidden_game_info_keys
+    ]
+    optional_game_info_cards = [
+        game_info_card(key, game_info.get(key), optional=True)
+        for key in ("total_towns", "total_utopias")
+        if key in game_info
+    ]
     metric_options = ["experience", "army_strength", "army_hitpoints", "attack", "defense", "power", "knowledge"]
     player_metric_options = ["gold", "town_count", "total_army_strength", "total_hero_army_strength", 
                              "total_garrison_army_strength", "total_army_hitpoints", "visited_utopias",
@@ -237,30 +632,77 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
     df_turn_time["turn"] = range(1, len(df_turn_time) + 1)
 
     app.layout = html.Div([
-        html.H1("Heroes 3 Savegame Analyzer Dashboard"),
+        html.Div([
+            html.H1("Heroes III Chronicle"),
+            html.P(
+                "A chronicle of kingdoms, heroes, and conquest",
+                className="dashboard-subtitle",
+            ),
+        ], className="dashboard-banner"),
 
-        # Toggle for Game Info
+        html.Div([
+            html.H2("Game Overview", style={"marginTop": "0"}),
+            html.Div(primary_game_info_cards, style={
+                "display": "grid",
+                "gridTemplateColumns": "repeat(auto-fit, minmax(210px, 1fr))",
+                "gap": "12px",
+            }),
+        ], style={
+            "padding": "20px",
+            "marginBottom": "12px",
+            "borderRadius": "14px",
+            "background": "linear-gradient(135deg, #f7f9fc 0%, #edf3f9 100%)",
+            "boxShadow": "0 5px 18px rgba(31, 45, 61, 0.09)",
+        }),
+
+        # Optional map totals
         html.Div([
             dcc.Checklist(
                 id="toggle_game_info",
-                options=[{"label": "Show Game Info", "value": "show"}],
+                options=[{"label": "Show town and Utopia totals", "value": "show"}],
                 value=[],  # Empty by default = hidden
-                style={"marginBottom": "10px"}
+                style={"marginBottom": "10px", "fontWeight": "600"}
             ),
             html.Div(
                 id="game_info_container",
-                children=[
-                    html.H3("Game Info"),
-                    dash_table.DataTable(
-                        columns=[{"name": "Key", "id": "Key"}, {"name": "Value", "id": "Value"}],
-                        data=[{"Key": k, "Value": str(v)} for k, v in game_info.items()],
-                        style_table={'width': '50%'},
-                        style_cell={'textAlign': 'left'},
-                    )
-                ],
+                children=html.Div(optional_game_info_cards, style={
+                    "display": "grid",
+                    "gridTemplateColumns": "repeat(auto-fit, minmax(210px, 280px))",
+                    "gap": "12px",
+                }),
                 style={"marginBottom": "30px", "display": "none"}  # Hidden by default
             )
         ]),
+
+        html.Div([
+            html.H2("Player Rankings Summary"),
+            html.P(
+                "A day-by-day leaderboard across economy, expansion, and military power.",
+                style={"color": "#5f6b7a", "marginTop": "-8px"},
+            ),
+            html.Label("Select Day"),
+            dcc.Slider(
+                id="player_summary_day_slider",
+                min=min(summary_days),
+                max=max(summary_days),
+                step=1,
+                value=max(summary_days),
+                marks={int(day): str(int(day)) for day in summary_days},
+                tooltip={"placement": "bottom", "always_visible": True},
+            ),
+            html.Div(
+                id="player_summary_table",
+                style={"marginTop": "28px"},
+            ),
+        ], style={
+            "padding": "22px",
+            "marginBottom": "30px",
+            "borderRadius": "14px",
+            "background": "linear-gradient(135deg, #f7f9fc 0%, #eef3f8 100%)",
+            "boxShadow": "0 6px 20px rgba(31, 45, 61, 0.10)",
+        }),
+
+        html.Hr(),
 
         html.Div([
             html.H2("Turn Duration Per Turn"),
@@ -272,7 +714,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             dcc.Dropdown(
                 id="player_selector",
                 options=[{"label": p, "value": p} for p in player_options],
-                value=player_options,
+                value=default_players,
                 multi=True
             ),
 
@@ -280,7 +722,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             dcc.Dropdown(
                 id="hero_selector",
                 options=[{"label": h, "value": h} for h in hero_options],
-                value=hero_options,
+                value=default_heroes,
                 multi=True
             ),
 
@@ -319,7 +761,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         dcc.Dropdown(
             id="army_hero_selector",
             options=[{"label": h, "value": h} for h in hero_options],
-            value=hero_options[:3],  # show first 3 heroes by default
+            value=default_army_heroes,
             multi=True
         ),
 
@@ -448,7 +890,14 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             dcc.Interval(id="fog_anim_interval", interval=800, n_intervals=0, disabled=True)
         ], style={"margin": "10px 0"}),
 
-        dcc.Graph(id="fog_of_war_map"),
+        dcc.Graph(
+            id="fog_of_war_map",
+            style={
+                "width": "1000px",
+                "maxWidth": "100%",
+                "margin": "14px auto 24px",
+            },
+        ),
 
         dcc.Slider(
             id="fog_day_slider",
@@ -458,7 +907,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             value=df_players["day"].min(),
             marks={int(day): str(day) for day in df_players["day"].unique()},
         ),
-    ])
+    ], className="homm-dashboard")
 
 
     # Chart specs start here:
@@ -508,13 +957,19 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
     @app.callback(
         Output("hero_selector", "options"),
         Output("hero_selector", "value"),
-        Input("player_selector", "value")
+        Input("player_selector", "value"),
+        State("hero_selector", "value")
     )
-    def update_hero_selector(selected_players):
+    def update_hero_selector(selected_players, selected_heroes):
+        selected_players = selected_players or []
         filtered = df_heroes[df_heroes["player_color"].isin(selected_players)]
         heroes = sorted(filtered["hero_name"].dropna().unique())
         options = [{"label": h, "value": h} for h in heroes]
-        return options, heroes
+        valid_heroes = set(heroes)
+        retained_selection = [
+            hero for hero in (selected_heroes or []) if hero in valid_heroes
+        ]
+        return options, retained_selection
 
     # Update line chart for heroes
     @app.callback(
@@ -536,18 +991,29 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
 
         for metric in selected_metrics:
             for (player, hero), group in filtered.groupby(["player_color", "hero_name"]):
+                player_color = PLAYER_COLORS.get(player, "#808080")
+                metric_label = metric.replace("_", " ").title()
                 fig.add_trace(go.Scatter(
                     x=group["day"],
                     y=group[metric],
                     mode="lines+markers",
-                    name=f"{hero} ({player}) - {metric.capitalize()}"
+                    name=f"{hero} ({player}) - {metric.capitalize()}",
+                    line={"color": player_color},
+                    marker={"color": player_color},
+                    hovertemplate=(
+                        f"<b>{hero}</b><br>"
+                        f"Player: {player}<br>"
+                        "Day: %{x}<br>"
+                        f"{metric_label}: %{{y:,}}"
+                        "<extra></extra>"
+                    ),
                 ))
 
         fig.update_layout(
             title="Hero Progress Over Time",
             xaxis_title="Game Day",
             yaxis_title="Value",
-            hovermode="x unified"
+            hovermode="closest"
         )
         return fig
 
@@ -678,6 +1144,230 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             legend=dict(traceorder="normal")  # Keep the order in which traces are added
         )
         return fig
+
+    @app.callback(
+        Output("player_summary_table", "children"),
+        Input("player_summary_day_slider", "value"),
+    )
+    def update_player_summary(selected_day):
+        rankings = build_player_summary_rankings(
+            df_players, df_heroes, selected_day
+        )
+        if not rankings:
+            return html.Div(
+                "No player data is available for this day.",
+                style={"padding": "20px", "color": "#687386"},
+            )
+
+        category_icons = {
+            "town_count": "🏰",
+            "heroes_controlled": "🦸",
+            "strongest_hero_strength": "👑",
+            "wood_and_ore": "🪵",
+            "rare_resources": "💎",
+            "gold": "🪙",
+            "visited_utopias": "🐉",
+            "total_army_strength": "⚔️",
+            "tiles_explored": "🗺️",
+            "adventure_spells": "✨",
+        }
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+        power_scores = build_player_power_scores(rankings)
+        leader_score = power_scores[0]["total"] if power_scores else 1
+        power_cards = []
+        for position, score in enumerate(power_scores, start=1):
+            player = score["player"]
+            color = PLAYER_COLORS.get(player, "#808080")
+            power_cards.append(html.Div([
+                html.Div([
+                    html.Span(
+                        medals.get(position, f"#{position}"),
+                        style={"fontSize": "22px", "minWidth": "34px"},
+                    ),
+                    html.Span(
+                        player,
+                        style={"fontSize": "18px", "fontWeight": "800", "color": color},
+                    ),
+                    html.Span(
+                        f"{score['total']} pts",
+                        style={
+                            "marginLeft": "auto",
+                            "fontSize": "18px",
+                            "fontWeight": "800",
+                            "color": "#263445",
+                        },
+                    ),
+                ], style={"display": "flex", "alignItems": "center", "gap": "8px"}),
+                html.Div([
+                    html.Span(f"⚔️ Military {score['Military']}"),
+                    html.Span(f"🗺️ Map {score['Map control']}"),
+                    html.Span(f"🪙 Economy {score['Economic']}"),
+                ], style={
+                    "display": "flex",
+                    "flexWrap": "wrap",
+                    "gap": "8px 14px",
+                    "margin": "10px 0",
+                    "fontSize": "12px",
+                    "fontWeight": "600",
+                    "color": "#5f6b7a",
+                }),
+                html.Div(
+                    html.Div(style={
+                        "width": f"{100 * score['total'] / max(leader_score, 1):.1f}%",
+                        "height": "100%",
+                        "borderRadius": "5px",
+                        "backgroundColor": color,
+                    }),
+                    style={
+                        "height": "8px",
+                        "borderRadius": "5px",
+                        "backgroundColor": "#dfe6ee",
+                        "overflow": "hidden",
+                    },
+                ),
+            ], style={
+                "padding": "14px",
+                "border": f"1px solid {color}55",
+                "borderTop": f"4px solid {color}",
+                "borderRadius": "11px",
+                "backgroundColor": "white",
+                "boxShadow": "0 3px 10px rgba(31, 45, 61, 0.09)",
+            }))
+
+        rows = []
+        current_group = None
+        for ranking in rankings:
+            if ranking["group"] != current_group:
+                current_group = ranking["group"]
+                group_icon = {
+                    "Military": "⚔️",
+                    "Map control": "🗺️",
+                    "Economic": "🪙",
+                }.get(current_group, "")
+                rows.append(html.Tr(html.Td(
+                    f"{group_icon} {current_group}",
+                    colSpan=2,
+                    style={
+                        "padding": "10px 16px",
+                        "fontSize": "16px",
+                        "fontWeight": "800",
+                        "color": "white",
+                        "backgroundColor": "#526579",
+                        "letterSpacing": "0.03em",
+                    },
+                )))
+            badges = []
+            for position, entry in enumerate(ranking["entries"], start=1):
+                player = entry["player"]
+                color = PLAYER_COLORS.get(player, "#808080")
+                value = int(entry["value"])
+                value_text = f"{value:,}"
+                if ranking["key"] == "strongest_hero_strength":
+                    value_text = f"{entry['hero']} · {value:,}"
+                elif ranking["key"] == "adventure_spells":
+                    spell_names = ", ".join(entry["spells"]) or "None"
+                    value_text = f"{spell_names} · {value * 5} pts"
+                badges.append(html.Div([
+                    html.Span(
+                        medals.get(position, f"#{position}"),
+                        style={"minWidth": "30px", "fontWeight": "700"},
+                    ),
+                    html.Span(style={
+                        "width": "11px",
+                        "height": "11px",
+                        "borderRadius": "50%",
+                        "backgroundColor": color,
+                        "boxShadow": f"0 0 0 3px {color}33",
+                        "display": "inline-block",
+                    }),
+                    html.Span(
+                        player,
+                        style={"fontWeight": "700", "color": color},
+                    ),
+                    html.Span(
+                        value_text,
+                        style={
+                            "marginLeft": "auto",
+                            "fontVariantNumeric": "tabular-nums",
+                            "fontWeight": "700",
+                            "color": "#263445",
+                        },
+                    ),
+                ], style={
+                    "display": "flex",
+                    "alignItems": "center",
+                    "gap": "9px",
+                    "minWidth": "170px",
+                    "padding": "8px 11px",
+                    "border": f"1px solid {color}55",
+                    "borderLeft": f"4px solid {color}",
+                    "borderRadius": "9px",
+                    "backgroundColor": "#ffffff",
+                    "boxShadow": "0 2px 6px rgba(31, 45, 61, 0.08)",
+                }))
+
+            rows.append(html.Tr([
+                html.Td([
+                    html.Span(
+                        category_icons.get(ranking["key"], "•"),
+                        style={"fontSize": "22px", "marginRight": "10px"},
+                    ),
+                    html.Span(ranking["label"], style={"fontWeight": "700"}),
+                ], style={
+                    "padding": "14px 16px",
+                    "whiteSpace": "nowrap",
+                    "verticalAlign": "top",
+                    "color": "#263445",
+                }),
+                html.Td(
+                    html.Div(badges, style={
+                        "display": "flex",
+                        "flexWrap": "wrap",
+                        "gap": "9px",
+                    }),
+                    style={"padding": "10px 14px"},
+                ),
+            ], style={"borderBottom": "1px solid #dfe6ee"}))
+
+        ranking_table = html.Table([
+            html.Thead(html.Tr([
+                html.Th("Category", style={"padding": "12px 16px"}),
+                html.Th(
+                    f"Player ranking — Day {int(selected_day)}",
+                    style={"padding": "12px 16px", "textAlign": "left"},
+                ),
+            ], style={
+                "backgroundColor": "#263445",
+                "color": "white",
+                "letterSpacing": "0.02em",
+            })),
+            html.Tbody(rows),
+        ], style={
+            "width": "100%",
+            "borderCollapse": "separate",
+            "borderSpacing": "0",
+            "overflow": "hidden",
+            "borderRadius": "12px",
+            "backgroundColor": "rgba(255, 255, 255, 0.75)",
+        })
+
+        return html.Div([
+            html.H3("Overall Power Ranking", style={"marginBottom": "6px"}),
+            html.P(
+                "Players earn placement points in each metric; tied values receive equal points. "
+                "Dimension Door, Town Portal, and Fly are worth 5 points each.",
+                style={"color": "#687386", "marginTop": "0"},
+            ),
+            html.Div(power_cards, style={
+                "display": "grid",
+                "gridTemplateColumns": "repeat(auto-fit, minmax(250px, 1fr))",
+                "gap": "12px",
+                "marginBottom": "24px",
+            }),
+            html.H3("Category Rankings", style={"marginBottom": "10px"}),
+            ranking_table,
+        ])
 
     # Pie chart for town ownership (latest day)
     @app.callback(
