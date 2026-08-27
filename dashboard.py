@@ -271,10 +271,36 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day):
         current["player_color"].map(hero_counts).fillna(0)
     )
 
+    heroes_today = df_heroes[
+        (df_heroes["day"] == selected_day)
+        & (df_heroes["player_color"] != "None")
+    ].copy()
+    if "army_strength" not in heroes_today:
+        heroes_today["army_strength"] = 0
+    heroes_today["army_strength"] = pd.to_numeric(
+        heroes_today["army_strength"], errors="coerce"
+    ).fillna(0)
+    strongest_heroes = (
+        heroes_today.sort_values(
+            ["army_strength", "hero_name"],
+            ascending=[False, True],
+            kind="stable",
+        )
+        .drop_duplicates("player_color", keep="first")
+        .set_index("player_color")
+    )
+    current["strongest_hero"] = current["player_color"].map(
+        strongest_heroes["hero_name"]
+    ).fillna("—")
+    current["strongest_hero_strength"] = current["player_color"].map(
+        strongest_heroes["army_strength"]
+    ).fillna(0)
+
     numeric_columns = [
         "town_count", "wood", "ore", "gems", "crystal", "sulfur",
         "mercury", "gold", "visited_utopias", "total_army_strength",
         "tiles_explored", "heroes_controlled",
+        "strongest_hero_strength",
     ]
     for column in numeric_columns:
         if column not in current:
@@ -290,6 +316,7 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day):
     categories = [
         ("town_count", "Towns controlled"),
         ("heroes_controlled", "Heroes controlled"),
+        ("strongest_hero_strength", "Strongest hero"),
         ("wood_and_ore", "Wood & ore"),
         ("rare_resources", "Gems, crystals, sulfur & mercury"),
         ("gold", "Gold"),
@@ -306,7 +333,11 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day):
     rankings = []
     for key, label in categories:
         entries = [
-            {"player": row.player_color, "value": row_value}
+            {
+                "player": row.player_color,
+                "value": row_value,
+                "hero": row.strongest_hero if key == "strongest_hero_strength" else None,
+            }
             for row in current.itertuples(index=False)
             for row_value in [getattr(row, key)]
         ]
@@ -864,6 +895,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         category_icons = {
             "town_count": "🏰",
             "heroes_controlled": "🦸",
+            "strongest_hero_strength": "👑",
             "wood_and_ore": "🪵",
             "rare_resources": "💎",
             "gold": "🪙",
@@ -880,6 +912,9 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                 player = entry["player"]
                 color = PLAYER_COLORS.get(player, "#808080")
                 value = int(entry["value"])
+                value_text = f"{value:,}"
+                if ranking["key"] == "strongest_hero_strength":
+                    value_text = f"{entry['hero']} · {value:,}"
                 badges.append(html.Div([
                     html.Span(
                         medals.get(position, f"#{position}"),
@@ -898,7 +933,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                         style={"fontWeight": "700", "color": color},
                     ),
                     html.Span(
-                        f"{value:,}",
+                        value_text,
                         style={
                             "marginLeft": "auto",
                             "fontVariantNumeric": "tabular-nums",

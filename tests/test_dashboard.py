@@ -91,6 +91,13 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
             [2, 1],
             [entry["value"] for entry in by_key["heroes_controlled"]["entries"]],
         )
+        self.assertEqual(
+            [("Gelu", 0), ("Solmyr", 0)],
+            [
+                (entry["hero"], entry["value"])
+                for entry in by_key["strongest_hero_strength"]["entries"]
+            ],
+        )
 
 
 if __name__ == "__main__":
