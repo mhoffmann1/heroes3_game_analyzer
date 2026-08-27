@@ -704,10 +704,10 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
 
         html.Hr(),
 
-        html.Div([
-            html.H2("Turn Duration Per Turn"),
-            dcc.Graph(id="turn_time_chart", style={'width': '100%'}),
+        html.H2("Turn Duration Per Turn"),
+        dcc.Graph(id="turn_time_chart", style={"width": "100%"}),
 
+        html.Div([
             html.H2("Hero Metrics Over Time"),
 
             html.Label("Select Players"),
