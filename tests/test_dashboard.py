@@ -5,6 +5,7 @@ import pandas as pd
 from dashboard import (
     build_player_power_scores,
     build_player_summary_rankings,
+    format_game_info_value,
     get_top_heroes_by_army_strength,
 )
 
@@ -45,6 +46,21 @@ class HeroMetricDefaultsTests(unittest.TestCase):
         ])
 
         self.assertEqual([], get_top_heroes_by_army_strength(heroes, []))
+
+
+class GameInfoFormattingTests(unittest.TestCase):
+    def test_formats_map_summary_values(self):
+        self.assertEqual("216 × 216", format_game_info_value("map_size", 216))
+        self.assertEqual(
+            "Red: Tower • Blue: Bulwark",
+            format_game_info_value(
+                "player_towns", {"red": "Tower", "blue": "Bulwark"}
+            ),
+        )
+        self.assertEqual(
+            "Alice, Bob",
+            format_game_info_value("player_names", ["Alice", "Bob"]),
+        )
 
 
 class PlayerSummaryRankingsTests(unittest.TestCase):

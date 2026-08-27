@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import State, dash_table, dcc, html
+from dash import State, dcc, html
 from dash.dependencies import Input, Output
 from plotly.subplots import make_subplots
 
@@ -206,6 +206,25 @@ def parse_day_from_filename(filename):
     except Exception:
         pass
     return None
+
+
+def format_game_info_value(key, value):
+    """Format raw game metadata for compact dashboard summary cards."""
+    if value is None or value == "":
+        return "—"
+    if key == "map_size":
+        return f"{value} × {value}"
+    if isinstance(value, dict):
+        if not value:
+            return "None"
+        return " • ".join(
+            f"{str(name).capitalize()}: {item}" for name, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(map(str, value)) if value else "None"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    return str(value)
 
 
 def get_top_heroes_by_army_strength(df_heroes, selected_players, limit=3):
@@ -464,6 +483,81 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         df_heroes, default_players, limit=1
     )
     summary_days = sorted(df_players["day"].dropna().unique())
+    optional_game_info_keys = {"total_utopias", "total_towns"}
+    hidden_game_info_keys = {
+        "map_visibility_base",
+        "map_visibility_offset",
+        "map_visibility_section",
+        "map_visibility_raw_map_size",
+        "map_visibility_normalized_map_size",
+        "map_visibility_configured_offsets",
+        "map_visibility_metadata_file",
+    }
+    game_info_labels = {
+        "map_name": "Map",
+        "player_names": "Human players",
+        "game_date": "Game date",
+        "template": "Template",
+        "human_players": "Human player count",
+        "computer_players": "Computer player count",
+        "player_towns": "Starting towns",
+        "map_size": "Map size",
+        "levels": "Map levels",
+        "water": "Water",
+        "monsters": "Monster strength",
+        "expansion": "Game version",
+        "total_utopias": "Dragon Utopias",
+        "total_towns": "Towns",
+    }
+    game_info_icons = {
+        "map_name": "🗺️", "player_names": "👥", "game_date": "📅",
+        "template": "🧩", "human_players": "🧑", "computer_players": "🤖",
+        "player_towns": "🏰", "map_size": "📐", "levels": "🌍",
+        "water": "🌊", "monsters": "👹", "expansion": "⚙️",
+        "total_utopias": "🐉", "total_towns": "🏘️",
+    }
+
+    def game_info_card(key, value, optional=False):
+        label = game_info_labels.get(key, key.replace("_", " ").title())
+        return html.Div([
+            html.Div([
+                html.Span(game_info_icons.get(key, "ℹ️"), style={"fontSize": "20px"}),
+                html.Span(label, style={
+                    "fontSize": "12px",
+                    "fontWeight": "700",
+                    "textTransform": "uppercase",
+                    "letterSpacing": "0.05em",
+                    "color": "#687386",
+                }),
+            ], style={"display": "flex", "alignItems": "center", "gap": "8px"}),
+            html.Div(
+                format_game_info_value(key, value),
+                style={
+                    "marginTop": "8px",
+                    "fontSize": "16px" if not optional else "22px",
+                    "fontWeight": "750",
+                    "color": "#263445",
+                    "overflowWrap": "anywhere",
+                },
+            ),
+        ], style={
+            "padding": "14px 16px",
+            "borderRadius": "11px",
+            "backgroundColor": "white",
+            "border": "1px solid #dfe6ee",
+            "boxShadow": "0 2px 8px rgba(31, 45, 61, 0.07)",
+        })
+
+    primary_game_info_cards = [
+        game_info_card(key, value)
+        for key, value in game_info.items()
+        if key not in optional_game_info_keys | hidden_game_info_keys
+    ]
+    optional_game_info_cards = [
+        game_info_card(key, game_info.get(key), optional=True)
+        for key in ("total_towns", "total_utopias")
+        if key in game_info
+    ]
     metric_options = ["experience", "army_strength", "army_hitpoints", "attack", "defense", "power", "knowledge"]
     player_metric_options = ["gold", "town_count", "total_army_strength", "total_hero_army_strength", 
                              "total_garrison_army_strength", "total_army_hitpoints", "visited_utopias",
@@ -489,25 +583,36 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
     app.layout = html.Div([
         html.H1("Heroes 3 Savegame Analyzer Dashboard"),
 
-        # Toggle for Game Info
+        html.Div([
+            html.H2("Game Overview", style={"marginTop": "0"}),
+            html.Div(primary_game_info_cards, style={
+                "display": "grid",
+                "gridTemplateColumns": "repeat(auto-fit, minmax(210px, 1fr))",
+                "gap": "12px",
+            }),
+        ], style={
+            "padding": "20px",
+            "marginBottom": "12px",
+            "borderRadius": "14px",
+            "background": "linear-gradient(135deg, #f7f9fc 0%, #edf3f9 100%)",
+            "boxShadow": "0 5px 18px rgba(31, 45, 61, 0.09)",
+        }),
+
+        # Optional map totals
         html.Div([
             dcc.Checklist(
                 id="toggle_game_info",
-                options=[{"label": "Show Game Info", "value": "show"}],
+                options=[{"label": "Show town and Utopia totals", "value": "show"}],
                 value=[],  # Empty by default = hidden
-                style={"marginBottom": "10px"}
+                style={"marginBottom": "10px", "fontWeight": "600"}
             ),
             html.Div(
                 id="game_info_container",
-                children=[
-                    html.H3("Game Info"),
-                    dash_table.DataTable(
-                        columns=[{"name": "Key", "id": "Key"}, {"name": "Value", "id": "Value"}],
-                        data=[{"Key": k, "Value": str(v)} for k, v in game_info.items()],
-                        style_table={'width': '50%'},
-                        style_cell={'textAlign': 'left'},
-                    )
-                ],
+                children=html.Div(optional_game_info_cards, style={
+                    "display": "grid",
+                    "gridTemplateColumns": "repeat(auto-fit, minmax(210px, 280px))",
+                    "gap": "12px",
+                }),
                 style={"marginBottom": "30px", "display": "none"}  # Hidden by default
             )
         ]),
