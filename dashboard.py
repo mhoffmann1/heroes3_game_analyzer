@@ -314,15 +314,15 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day):
     )
 
     categories = [
-        ("town_count", "Towns controlled"),
-        ("heroes_controlled", "Heroes controlled"),
-        ("strongest_hero_strength", "Strongest hero"),
-        ("wood_and_ore", "Wood & ore"),
-        ("rare_resources", "Gems, crystals, sulfur & mercury"),
-        ("gold", "Gold"),
-        ("visited_utopias", "Utopias visited"),
-        ("total_army_strength", "Total army strength"),
-        ("tiles_explored", "Map tiles discovered"),
+        ("heroes_controlled", "Heroes controlled", "Military"),
+        ("strongest_hero_strength", "Strongest hero", "Military"),
+        ("total_army_strength", "Total army strength", "Military"),
+        ("town_count", "Towns controlled", "Map control"),
+        ("visited_utopias", "Utopias visited", "Map control"),
+        ("tiles_explored", "Map tiles discovered", "Map control"),
+        ("wood_and_ore", "Wood & ore", "Economic"),
+        ("rare_resources", "Gems, crystals, sulfur & mercury", "Economic"),
+        ("gold", "Gold", "Economic"),
     ]
     player_order = {
         player: index for index, player in enumerate(
@@ -331,7 +331,7 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day):
     }
 
     rankings = []
-    for key, label in categories:
+    for key, label, group in categories:
         entries = [
             {
                 "player": row.player_color,
@@ -347,9 +347,63 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day):
                 player_order.get(entry["player"], len(player_order)),
             )
         )
-        rankings.append({"key": key, "label": label, "entries": entries})
+        rankings.append({
+            "key": key,
+            "label": label,
+            "group": group,
+            "entries": entries,
+        })
 
     return rankings
+
+
+def build_player_power_scores(rankings):
+    """Award placement points and return category and overall player scores."""
+    if not rankings:
+        return []
+
+    players = list(dict.fromkeys(
+        entry["player"]
+        for ranking in rankings
+        for entry in ranking["entries"]
+    ))
+    scores = {
+        player: {
+            "player": player,
+            "Military": 0,
+            "Map control": 0,
+            "Economic": 0,
+            "total": 0,
+        }
+        for player in players
+    }
+
+    for ranking in rankings:
+        player_count = len(ranking["entries"])
+        previous_value = None
+        previous_points = None
+        for position, entry in enumerate(ranking["entries"], start=1):
+            if previous_value is not None and entry["value"] == previous_value:
+                points = previous_points
+            else:
+                points = max(player_count - position + 1, 1)
+            scores[entry["player"]][ranking["group"]] += points
+            scores[entry["player"]]["total"] += points
+            previous_value = entry["value"]
+            previous_points = points
+
+    player_order = {
+        player: index for index, player in enumerate(
+            ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink"]
+        )
+    }
+    return sorted(
+        scores.values(),
+        key=lambda score: (
+            -score["total"],
+            player_order.get(score["player"], len(player_order)),
+        ),
+    )
 
 
 def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, df_utopias, port):
@@ -905,8 +959,90 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         }
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
 
+        power_scores = build_player_power_scores(rankings)
+        leader_score = power_scores[0]["total"] if power_scores else 1
+        power_cards = []
+        for position, score in enumerate(power_scores, start=1):
+            player = score["player"]
+            color = PLAYER_COLORS.get(player, "#808080")
+            power_cards.append(html.Div([
+                html.Div([
+                    html.Span(
+                        medals.get(position, f"#{position}"),
+                        style={"fontSize": "22px", "minWidth": "34px"},
+                    ),
+                    html.Span(
+                        player,
+                        style={"fontSize": "18px", "fontWeight": "800", "color": color},
+                    ),
+                    html.Span(
+                        f"{score['total']} pts",
+                        style={
+                            "marginLeft": "auto",
+                            "fontSize": "18px",
+                            "fontWeight": "800",
+                            "color": "#263445",
+                        },
+                    ),
+                ], style={"display": "flex", "alignItems": "center", "gap": "8px"}),
+                html.Div([
+                    html.Span(f"⚔️ Military {score['Military']}"),
+                    html.Span(f"🗺️ Map {score['Map control']}"),
+                    html.Span(f"🪙 Economy {score['Economic']}"),
+                ], style={
+                    "display": "flex",
+                    "flexWrap": "wrap",
+                    "gap": "8px 14px",
+                    "margin": "10px 0",
+                    "fontSize": "12px",
+                    "fontWeight": "600",
+                    "color": "#5f6b7a",
+                }),
+                html.Div(
+                    html.Div(style={
+                        "width": f"{100 * score['total'] / max(leader_score, 1):.1f}%",
+                        "height": "100%",
+                        "borderRadius": "5px",
+                        "backgroundColor": color,
+                    }),
+                    style={
+                        "height": "8px",
+                        "borderRadius": "5px",
+                        "backgroundColor": "#dfe6ee",
+                        "overflow": "hidden",
+                    },
+                ),
+            ], style={
+                "padding": "14px",
+                "border": f"1px solid {color}55",
+                "borderTop": f"4px solid {color}",
+                "borderRadius": "11px",
+                "backgroundColor": "white",
+                "boxShadow": "0 3px 10px rgba(31, 45, 61, 0.09)",
+            }))
+
         rows = []
+        current_group = None
         for ranking in rankings:
+            if ranking["group"] != current_group:
+                current_group = ranking["group"]
+                group_icon = {
+                    "Military": "⚔️",
+                    "Map control": "🗺️",
+                    "Economic": "🪙",
+                }.get(current_group, "")
+                rows.append(html.Tr(html.Td(
+                    f"{group_icon} {current_group}",
+                    colSpan=2,
+                    style={
+                        "padding": "10px 16px",
+                        "fontSize": "16px",
+                        "fontWeight": "800",
+                        "color": "white",
+                        "backgroundColor": "#526579",
+                        "letterSpacing": "0.03em",
+                    },
+                )))
             badges = []
             for position, entry in enumerate(ranking["entries"], start=1):
                 player = entry["player"]
@@ -977,7 +1113,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                 ),
             ], style={"borderBottom": "1px solid #dfe6ee"}))
 
-        return html.Table([
+        ranking_table = html.Table([
             html.Thead(html.Tr([
                 html.Th("Category", style={"padding": "12px 16px"}),
                 html.Th(
@@ -998,6 +1134,22 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             "borderRadius": "12px",
             "backgroundColor": "rgba(255, 255, 255, 0.75)",
         })
+
+        return html.Div([
+            html.H3("Overall Power Ranking", style={"marginBottom": "6px"}),
+            html.P(
+                "Players earn placement points in each metric; tied values receive equal points.",
+                style={"color": "#687386", "marginTop": "0"},
+            ),
+            html.Div(power_cards, style={
+                "display": "grid",
+                "gridTemplateColumns": "repeat(auto-fit, minmax(250px, 1fr))",
+                "gap": "12px",
+                "marginBottom": "24px",
+            }),
+            html.H3("Category Rankings", style={"marginBottom": "10px"}),
+            ranking_table,
+        ])
 
     # Pie chart for town ownership (latest day)
     @app.callback(

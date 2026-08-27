@@ -2,7 +2,11 @@ import unittest
 
 import pandas as pd
 
-from dashboard import build_player_summary_rankings, get_top_heroes_by_army_strength
+from dashboard import (
+    build_player_power_scores,
+    build_player_summary_rankings,
+    get_top_heroes_by_army_strength,
+)
 
 
 class HeroMetricDefaultsTests(unittest.TestCase):
@@ -98,6 +102,38 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
                 for entry in by_key["strongest_hero_strength"]["entries"]
             ],
         )
+
+        scores = build_player_power_scores(rankings)
+        scores_by_player = {score["player"]: score for score in scores}
+        self.assertGreater(
+            scores_by_player["Blue"]["Map control"],
+            scores_by_player["Red"]["Map control"],
+        )
+        self.assertEqual(
+            scores_by_player["Red"]["total"],
+            scores_by_player["Red"]["Military"]
+            + scores_by_player["Red"]["Map control"]
+            + scores_by_player["Red"]["Economic"],
+        )
+
+    def test_tied_values_receive_equal_points(self):
+        rankings = [{
+            "key": "gold",
+            "label": "Gold",
+            "group": "Economic",
+            "entries": [
+                {"player": "Red", "value": 100},
+                {"player": "Blue", "value": 100},
+                {"player": "Tan", "value": 50},
+            ],
+        }]
+
+        scores = {
+            score["player"]: score for score in build_player_power_scores(rankings)
+        }
+        self.assertEqual(3, scores["Red"]["Economic"])
+        self.assertEqual(3, scores["Blue"]["Economic"])
+        self.assertEqual(1, scores["Tan"]["Economic"])
 
 
 if __name__ == "__main__":
