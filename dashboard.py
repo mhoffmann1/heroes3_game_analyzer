@@ -256,6 +256,9 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
     default_heroes = get_top_heroes_by_army_strength(
         df_heroes, default_players, limit=3
     )
+    default_army_heroes = get_top_heroes_by_army_strength(
+        df_heroes, default_players, limit=1
+    )
     metric_options = ["experience", "army_strength", "army_hitpoints", "attack", "defense", "power", "knowledge"]
     player_metric_options = ["gold", "town_count", "total_army_strength", "total_hero_army_strength", 
                              "total_garrison_army_strength", "total_army_hitpoints", "visited_utopias",
@@ -361,7 +364,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         dcc.Dropdown(
             id="army_hero_selector",
             options=[{"label": h, "value": h} for h in hero_options],
-            value=hero_options[:3],  # show first 3 heroes by default
+            value=default_army_heroes,
             multi=True
         ),
 

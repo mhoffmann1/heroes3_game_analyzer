@@ -30,6 +30,11 @@ class HeroMetricDefaultsTests(unittest.TestCase):
         self.assertNotIn("OldStar", selected)
         self.assertNotIn("Neutral", selected)
 
+        strongest_per_player = get_top_heroes_by_army_strength(
+            heroes, ["Red", "Blue"], limit=1
+        )
+        self.assertEqual(["Crag", "Solmyr"], strongest_per_player)
+
     def test_returns_empty_selection_without_players(self):
         heroes = pd.DataFrame(columns=[
             "day", "player_color", "hero_name", "army_strength"
