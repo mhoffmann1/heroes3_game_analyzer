@@ -890,7 +890,14 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             dcc.Interval(id="fog_anim_interval", interval=800, n_intervals=0, disabled=True)
         ], style={"margin": "10px 0"}),
 
-        dcc.Graph(id="fog_of_war_map"),
+        dcc.Graph(
+            id="fog_of_war_map",
+            style={
+                "width": "1000px",
+                "maxWidth": "100%",
+                "margin": "14px auto 24px",
+            },
+        ),
 
         dcc.Slider(
             id="fog_day_slider",
