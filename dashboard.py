@@ -9,11 +9,61 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
 from dash import State, dcc, html
 from dash.dependencies import Input, Output
 from plotly.subplots import make_subplots
 
 logger = logging.getLogger(__package__)
+
+
+def configure_homm3_plotly_theme():
+    """Install the shared parchment-and-gold chart theme."""
+    pio.templates["homm3"] = go.layout.Template(layout={
+        "font": {
+            "family": "Georgia, 'Palatino Linotype', 'Book Antiqua', serif",
+            "color": "#2d261c",
+            "size": 13,
+        },
+        "title": {
+            "font": {"color": "#392d1c", "size": 22},
+            "x": 0.03,
+            "xanchor": "left",
+        },
+        "paper_bgcolor": "rgba(250, 244, 224, 0.96)",
+        "plot_bgcolor": "rgba(255, 252, 239, 0.92)",
+        "colorway": [
+            "#9f1d20", "#244d9b", "#b08a58", "#2f7d3b",
+            "#c76b20", "#6f3b88", "#177d7b", "#bd5577",
+        ],
+        "hoverlabel": {
+            "bgcolor": "#fff8df",
+            "bordercolor": "#9a742c",
+            "font": {"color": "#241d14", "family": "Georgia, serif"},
+        },
+        "legend": {
+            "bgcolor": "rgba(255, 249, 229, 0.86)",
+            "bordercolor": "#b99a5b",
+            "borderwidth": 1,
+            "font": {"color": "#33291d"},
+        },
+        "xaxis": {
+            "gridcolor": "rgba(114, 88, 48, 0.16)",
+            "linecolor": "#917343",
+            "zerolinecolor": "rgba(114, 88, 48, 0.28)",
+            "tickcolor": "#917343",
+            "title": {"font": {"color": "#493a27"}},
+        },
+        "yaxis": {
+            "gridcolor": "rgba(114, 88, 48, 0.16)",
+            "linecolor": "#917343",
+            "zerolinecolor": "rgba(114, 88, 48, 0.28)",
+            "tickcolor": "#917343",
+            "title": {"font": {"color": "#493a27"}},
+        },
+        "margin": {"l": 70, "r": 35, "t": 70, "b": 60},
+    })
+    pio.templates.default = "homm3"
 
 
 
@@ -470,6 +520,7 @@ def build_player_power_scores(rankings):
 
 
 def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, df_utopias, port):
+    configure_homm3_plotly_theme()
     app = dash.Dash(__name__)
     server = app.server
 
@@ -581,7 +632,13 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
     df_turn_time["turn"] = range(1, len(df_turn_time) + 1)
 
     app.layout = html.Div([
-        html.H1("Heroes 3 Savegame Analyzer Dashboard"),
+        html.Div([
+            html.H1("Heroes III Chronicle"),
+            html.P(
+                "A chronicle of kingdoms, heroes, and conquest",
+                className="dashboard-subtitle",
+            ),
+        ], className="dashboard-banner"),
 
         html.Div([
             html.H2("Game Overview", style={"marginTop": "0"}),
@@ -843,7 +900,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             value=df_players["day"].min(),
             marks={int(day): str(day) for day in df_players["day"].unique()},
         ),
-    ])
+    ], className="homm-dashboard")
 
 
     # Chart specs start here:
