@@ -70,9 +70,22 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
             },
         ])
         heroes = pd.DataFrame([
-            {"day": 4, "player_color": "Red", "hero_name": "Gelu"},
-            {"day": 4, "player_color": "Red", "hero_name": "Kyrre"},
-            {"day": 4, "player_color": "Blue", "hero_name": "Solmyr"},
+            {
+                "day": 3, "player_color": "Red", "hero_name": "Gelu",
+                "has_dd": True, "has_tp": False, "has_fly": True,
+            },
+            {
+                "day": 4, "player_color": "Red", "hero_name": "Gelu",
+                "has_dd": False, "has_tp": False, "has_fly": False,
+            },
+            {
+                "day": 4, "player_color": "Red", "hero_name": "Kyrre",
+                "has_dd": False, "has_tp": True, "has_fly": False,
+            },
+            {
+                "day": 4, "player_color": "Blue", "hero_name": "Solmyr",
+                "has_dd": False, "has_tp": False, "has_fly": False,
+            },
             {"day": 4, "player_color": "None", "hero_name": "Neutral"},
         ])
 
@@ -102,12 +115,22 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
                 for entry in by_key["strongest_hero_strength"]["entries"]
             ],
         )
+        self.assertEqual(
+            [
+                ("Red", 3, ["Dimension Door", "Town Portal", "Fly"]),
+                ("Blue", 0, []),
+            ],
+            [
+                (entry["player"], entry["value"], entry["spells"])
+                for entry in by_key["adventure_spells"]["entries"]
+            ],
+        )
 
         scores = build_player_power_scores(rankings)
         scores_by_player = {score["player"]: score for score in scores}
         self.assertGreater(
-            scores_by_player["Blue"]["Map control"],
             scores_by_player["Red"]["Map control"],
+            scores_by_player["Blue"]["Map control"],
         )
         self.assertEqual(
             scores_by_player["Red"]["total"],
@@ -115,6 +138,7 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
             + scores_by_player["Red"]["Map control"]
             + scores_by_player["Red"]["Economic"],
         )
+        self.assertGreaterEqual(scores_by_player["Red"]["Map control"], 15)
 
     def test_tied_values_receive_equal_points(self):
         rankings = [{

@@ -296,11 +296,46 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day):
         strongest_heroes["army_strength"]
     ).fillna(0)
 
+    # Match "Spell Availability Over Time": access is cumulative, so once a
+    # player has had one of these spells it remains unlocked on later days.
+    spell_history = df_heroes[
+        (df_heroes["day"] <= selected_day)
+        & (df_heroes["player_color"] != "None")
+    ].copy()
+    spell_columns = {
+        "has_dd": "Dimension Door",
+        "has_tp": "Town Portal",
+        "has_fly": "Fly",
+    }
+    for column in spell_columns:
+        if column not in spell_history:
+            spell_history[column] = False
+        spell_history[column] = spell_history[column].map(
+            lambda value: (
+                value is True
+                or value == 1
+                or (isinstance(value, str) and value.lower() == "true")
+            )
+        )
+    spell_access = spell_history.groupby("player_color")[list(spell_columns)].max()
+    current["adventure_spells"] = current["player_color"].map(
+        spell_access.sum(axis=1)
+    ).fillna(0)
+    current["adventure_spell_names"] = current["player_color"].map(
+        spell_access.apply(
+            lambda row: [
+                label for column, label in spell_columns.items() if row[column]
+            ],
+            axis=1,
+        )
+    ).apply(lambda value: value if isinstance(value, list) else [])
+
     numeric_columns = [
         "town_count", "wood", "ore", "gems", "crystal", "sulfur",
         "mercury", "gold", "visited_utopias", "total_army_strength",
         "tiles_explored", "heroes_controlled",
         "strongest_hero_strength",
+        "adventure_spells",
     ]
     for column in numeric_columns:
         if column not in current:
@@ -320,6 +355,7 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day):
         ("town_count", "Towns controlled", "Map control"),
         ("visited_utopias", "Utopias visited", "Map control"),
         ("tiles_explored", "Map tiles discovered", "Map control"),
+        ("adventure_spells", "Adventure spells", "Map control"),
         ("wood_and_ore", "Wood & ore", "Economic"),
         ("rare_resources", "Gems, crystals, sulfur & mercury", "Economic"),
         ("gold", "Gold", "Economic"),
@@ -337,6 +373,7 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day):
                 "player": row.player_color,
                 "value": row_value,
                 "hero": row.strongest_hero if key == "strongest_hero_strength" else None,
+                "spells": row.adventure_spell_names if key == "adventure_spells" else None,
             }
             for row in current.itertuples(index=False)
             for row_value in [getattr(row, key)]
@@ -379,6 +416,13 @@ def build_player_power_scores(rankings):
     }
 
     for ranking in rankings:
+        if ranking["key"] == "adventure_spells":
+            for entry in ranking["entries"]:
+                points = int(entry["value"]) * 5
+                scores[entry["player"]][ranking["group"]] += points
+                scores[entry["player"]]["total"] += points
+            continue
+
         player_count = len(ranking["entries"])
         previous_value = None
         previous_points = None
@@ -956,6 +1000,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             "visited_utopias": "🐉",
             "total_army_strength": "⚔️",
             "tiles_explored": "🗺️",
+            "adventure_spells": "✨",
         }
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
 
@@ -1051,6 +1096,9 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                 value_text = f"{value:,}"
                 if ranking["key"] == "strongest_hero_strength":
                     value_text = f"{entry['hero']} · {value:,}"
+                elif ranking["key"] == "adventure_spells":
+                    spell_names = ", ".join(entry["spells"]) or "None"
+                    value_text = f"{spell_names} · {value * 5} pts"
                 badges.append(html.Div([
                     html.Span(
                         medals.get(position, f"#{position}"),
@@ -1138,7 +1186,8 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         return html.Div([
             html.H3("Overall Power Ranking", style={"marginBottom": "6px"}),
             html.P(
-                "Players earn placement points in each metric; tied values receive equal points.",
+                "Players earn placement points in each metric; tied values receive equal points. "
+                "Dimension Door, Town Portal, and Fly are worth 5 points each.",
                 style={"color": "#687386", "marginTop": "0"},
             ),
             html.Div(power_cards, style={
