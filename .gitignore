@@ -25,4 +25,5 @@ other
 *.txt
 *.log
 *.GM*
+!arena.GM4
 *.swp

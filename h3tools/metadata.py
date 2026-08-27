@@ -1982,6 +1982,14 @@ class Savefile(object):
         if not self.heroes: self.populate_heroes()
         for hero in self.heroes: hero.parse()
 
+    def parse_xyz_from_hero_header(self, header: bytes):
+        """Return adventure-map coordinates stored in a hero record header."""
+        return {
+            "x": int.from_bytes(header[0:2], "big"),
+            "y": int.from_bytes(header[2:4], "big"),
+            "z": int.from_bytes(header[4:6], "big"),
+        }
+
     def populate_heroes(self):
         heroes = []
         rgx_strip = re.compile(br"^(?!\xFF+\x00+$)([^\x00-\x19]+)\x00+$")
@@ -2001,6 +2009,8 @@ class Savefile(object):
                 fullblob = bytearray(self.raw[pos + start-63:pos + end])
                 ownership_byte = fullblob[0x20] if len(fullblob) > 0x20 else 255
                 hero.set_owner(ownership_byte)
+                header = bytearray(self.raw[pos + start-58:pos + start])
+                hero.coords = self.parse_xyz_from_hero_header(header)
                 #print(f"Ownership byte (0x20): 0x{ownership_byte:02X} ({ownership_byte})")
                 #print(f"Player: {hero.owner}")
                 heroes.append(hero)
