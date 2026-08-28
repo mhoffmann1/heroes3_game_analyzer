@@ -71,6 +71,7 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
                 "wood": 10, "ore": 15, "gems": 1, "crystal": 2,
                 "sulfur": 3, "mercury": 4, "gold": 5000,
                 "visited_utopias": 1, "total_army_strength": 900,
+                "visited_obelisks": 2,
                 "tiles_explored": 120,
             },
             {
@@ -78,6 +79,7 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
                 "wood": 20, "ore": 20, "gems": 2, "crystal": 3,
                 "sulfur": 4, "mercury": 5, "gold": 4000,
                 "visited_utopias": 2, "total_army_strength": 800,
+                "visited_obelisks": 1,
                 "tiles_explored": 150,
             },
             {
@@ -119,6 +121,13 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
         self.assertEqual(
             [14, 10],
             [entry["value"] for entry in by_key["rare_resources"]["entries"]],
+        )
+        self.assertEqual(
+            [("Red", 2), ("Blue", 1)],
+            [
+                (entry["player"], entry["value"])
+                for entry in by_key["visited_obelisks"]["entries"]
+            ],
         )
         self.assertEqual(
             [2, 1],
