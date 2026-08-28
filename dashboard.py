@@ -188,6 +188,7 @@ def parse_data(data):
                 "town_count": player_data.get("town_count", 0),
                 "town_summary": simplified_towns,
                 "visited_utopias": player_data.get("visited_utopias", 0),
+                "visited_obelisks": player_data.get("visited_obelisks", 0),
                 "total_hero_army_strength": player_data.get("heroes_strength", 0),
                 "total_garrison_army_strength": player_data.get("garrison_strength", 0),
                 "total_army_strength": player_data.get("total_strength", 0),
@@ -401,7 +402,8 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day):
 
     numeric_columns = [
         "town_count", "wood", "ore", "gems", "crystal", "sulfur",
-        "mercury", "gold", "visited_utopias", "total_army_strength",
+        "mercury", "gold", "visited_utopias", "visited_obelisks",
+        "total_army_strength",
         "tiles_explored", "heroes_controlled",
         "strongest_hero_strength",
         "adventure_spells",
@@ -423,6 +425,7 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day):
         ("total_army_strength", "Total army strength", "Military"),
         ("town_count", "Towns controlled", "Map control"),
         ("visited_utopias", "Utopias visited", "Map control"),
+        ("visited_obelisks", "Obelisks discovered", "Map control"),
         ("tiles_explored", "Map tiles discovered", "Map control"),
         ("adventure_spells", "Adventure spells", "Map control"),
         ("wood_and_ore", "Wood & ore", "Economic"),
@@ -612,7 +615,8 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
     metric_options = ["experience", "army_strength", "army_hitpoints", "attack", "defense", "power", "knowledge"]
     player_metric_options = ["gold", "town_count", "total_army_strength", "total_hero_army_strength", 
                              "total_garrison_army_strength", "total_army_hitpoints", "visited_utopias",
-                             "tiles_explored", "wood", "ore", "mercury", "sulfur", "crystal", "gems"]
+                             "visited_obelisks", "tiles_explored", "wood", "ore", "mercury", "sulfur",
+                             "crystal", "gems"]
 
     PLAYER_COLORS = {
         "Red": "#FF0000",
@@ -1167,6 +1171,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             "rare_resources": "💎",
             "gold": "🪙",
             "visited_utopias": "🐉",
+            "visited_obelisks": "🗿",
             "total_army_strength": "⚔️",
             "tiles_explored": "🗺️",
             "adventure_spells": "✨",

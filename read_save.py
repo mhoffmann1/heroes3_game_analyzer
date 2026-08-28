@@ -22,6 +22,83 @@ logger = logging.getLogger('h3_analyzer')
 #logging.basicConfig(filename='h3parser.log', encoding='utf-8', level=logging.DEBUG)
 
 PLAYER_COLORS = ['Red', 'Blue', 'Tan', 'Green', 'Orange', 'Purple', 'Teal', 'Pink']
+MAX_OBELISKS = 48
+OBELISK_TRAILING_SIGNATURE = bytes.fromhex("000300000000ff03ff3fff")
+
+
+def extract_obelisk_data(raw):
+    """Extract native HoTA Obelisk count and per-object player visit masks."""
+    raw = bytes(raw)
+    empty_result = {
+        "total": 0,
+        "table_offset": None,
+        "visited_by_player": {color: 0 for color in PLAYER_COLORS},
+        "objects": [],
+    }
+    if not raw:
+        return empty_result
+
+    candidates = []
+
+    # Native HoTA stores one total-count byte followed by a fixed 48-byte
+    # Obelisk visit-mask array. Each mask uses one bit per player color. The
+    # A signature 13 bytes after that array is stable across the older layout
+    # and HoTA 1.8.0. Bytes immediately after the array are intentionally not
+    # checked because their layout changed in HoTA 1.8.0.
+    signature_offset = 1 + MAX_OBELISKS + 13
+    candidate_size = signature_offset + len(OBELISK_TRAILING_SIGNATURE)
+    for offset in range(len(raw) - candidate_size + 1):
+        total = raw[offset]
+        if total > MAX_OBELISKS:
+            continue
+        if raw[
+            offset + signature_offset:offset + candidate_size
+        ] != OBELISK_TRAILING_SIGNATURE:
+            continue
+
+        masks = raw[offset + 1:offset + 1 + MAX_OBELISKS]
+        if any(masks[total:]):
+            continue
+        candidates.append((offset, total, masks[:total]))
+
+    if len(candidates) != 1:
+        logger.warning(
+            "Expected one native HoTA Obelisk table, found %s candidate(s).",
+            len(candidates),
+        )
+        return empty_result
+
+    table_offset, total, masks = candidates[0]
+    visited_by_player = {
+        color: sum(bool(mask & (1 << player_index)) for mask in masks)
+        for player_index, color in enumerate(PLAYER_COLORS)
+    }
+    objects = [
+        {
+            "index": index,
+            "visited_mask": mask,
+            "visited_by": [
+                color
+                for player_index, color in enumerate(PLAYER_COLORS)
+                if mask & (1 << player_index)
+            ],
+        }
+        for index, mask in enumerate(masks)
+    ]
+
+    logger.debug(
+        "Obelisk table found at offset %s: total=%s, visits=%s, masks=%s",
+        table_offset,
+        total,
+        visited_by_player,
+        list(masks),
+    )
+    return {
+        "total": total,
+        "table_offset": table_offset,
+        "visited_by_player": visited_by_player,
+        "objects": objects,
+    }
 
 
 def format_player_bitmask(bitmask):
@@ -74,7 +151,8 @@ def parse_game_info(mapdata, towns):
         "monsters": 0,
         "expansion": "",
         "towns": [],
-        "total_utopias": 0
+        "total_utopias": 0,
+        "total_obelisks": 0,
     }
     
     # Parse mapdata['name'] for player names, game date, and template
@@ -281,6 +359,8 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
     resources = getattr(save, "player_resources")
     #logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
     game_info = parse_game_info(mapdata, towns)
+    obelisk_data = extract_obelisk_data(getattr(save, "raw", b""))
+    game_info["total_obelisks"] = obelisk_data["total"]
     
     # Utopia data:
     # If dragon_utopia_state is empty - then extract info from map tiles and put into dragon_utopia_state
@@ -449,7 +529,13 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
                         logger.info(f"There are 2 or more players that already had access to conquered Utopia, unable to determine who conquered it")
                  
     # Return both heroes and game info
-    return {"heroes": heroes, "game_info": game_info, "resources": resources, "utopias": utopias_summary}, tracker 
+    return {
+        "heroes": heroes,
+        "game_info": game_info,
+        "resources": resources,
+        "utopias": utopias_summary,
+        "obelisks": obelisk_data,
+    }, tracker 
 
 def find_single_one(bitmask: str) -> int | None:
     """
@@ -499,6 +585,7 @@ def aggregate_player_data(json_data, utopia_tracker):
             'heroes': [],
             'towns': [],
             'visited_utopias': 0,
+            'visited_obelisks': 0,
             'resources': {}
         }
     
@@ -541,6 +628,9 @@ def aggregate_player_data(json_data, utopia_tracker):
 
         if player != 'None':
             players[player]['visited_utopias'] = visited_utopias_summary[player]
+            players[player]['visited_obelisks'] = json_data.get(
+                'obelisks', {}
+            ).get('visited_by_player', {}).get(player, 0)
     
     utopias = {}
     for i, utopia in enumerate(json_data['utopias']):
@@ -549,7 +639,8 @@ def aggregate_player_data(json_data, utopia_tracker):
     return {
         'game_info': game_info,
         'players': players,
-        'utopias': utopias
+        'utopias': utopias,
+        'obelisks': json_data.get('obelisks', {})
                 
     }
 
