@@ -182,12 +182,65 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
         scores = {
             score["player"]: score for score in build_player_power_scores(rankings)
         }
-        self.assertEqual(3, scores["Red"]["Economic"])
-        self.assertEqual(3, scores["Blue"]["Economic"])
-        self.assertEqual(1, scores["Tan"]["Economic"])
+        self.assertEqual(15, scores["Red"]["Economic"])
+        self.assertEqual(15, scores["Blue"]["Economic"])
+        self.assertEqual(7, scores["Tan"]["Economic"])
 
 
 class AchievementTests(unittest.TestCase):
+    def test_arcane_supremacy_requires_three_distinct_heroes(self):
+        players = pd.DataFrame([
+            {"day": 1, "player_color": "Red"},
+            {"day": 1, "player_color": "Blue"},
+        ])
+        heroes = pd.DataFrame([
+            {"day": 1, "player_color": "Red", "hero_name": "A",
+             "has_tp": True, "has_fly": True, "has_dd": False},
+            {"day": 1, "player_color": "Red", "hero_name": "B",
+             "has_tp": False, "has_fly": True, "has_dd": False},
+            {"day": 1, "player_color": "Red", "hero_name": "C",
+             "has_tp": False, "has_fly": False, "has_dd": True},
+            {"day": 1, "player_color": "Blue", "hero_name": "Solo",
+             "has_tp": True, "has_fly": True, "has_dd": True},
+        ])
+
+        awards = {award["key"]: award for award in build_achievement_awards(players, heroes)}
+
+        self.assertEqual("Red", awards["Arcane Supremacy"]["player"])
+
+    def test_applies_minimum_army_floors_to_special_achievements(self):
+        players = pd.DataFrame([
+            {"day": 1, "player_color": "Red", "total_army_strength": 99_000,
+             "total_hero_army_strength": 340_000, "total_garrison_army_strength": 9_000},
+            {"day": 1, "player_color": "Blue", "total_army_strength": 500_000,
+             "total_hero_army_strength": 500_000, "total_garrison_army_strength": 0},
+            {"day": 2, "player_color": "Red", "total_army_strength": 350_000,
+             "total_hero_army_strength": 340_000, "total_garrison_army_strength": 10_000},
+            {"day": 2, "player_color": "Blue", "total_army_strength": 500_000,
+             "total_hero_army_strength": 500_000, "total_garrison_army_strength": 0},
+        ])
+        heroes = pd.DataFrame([
+            {
+                "day": day, "player_color": "Red", "hero_name": f"Hero {index}",
+                "army_strength": (
+                    280_000 if index == 0
+                    else 9_999 if day == 1 and index == 6
+                    else 10_000
+                ),
+            }
+            for day in (1, 2) for index in range(7)
+        ] + [
+            {"day": day, "player_color": "Blue", "hero_name": f"Blue Hero {index}",
+             "army_strength": 250_000}
+            for day in (1, 2) for index in range(2)
+        ])
+
+        awards = {award["key"]: award for award in build_achievement_awards(players, heroes)}
+
+        self.assertEqual(2, awards["Seven Samurai"]["day"])
+        self.assertEqual(2, awards["One Champion"]["day"])
+        self.assertEqual(2, awards["Turtle King"]["day"])
+
     def test_awards_each_achievement_once_using_turn_order_for_ties(self):
         players = pd.DataFrame([
             {

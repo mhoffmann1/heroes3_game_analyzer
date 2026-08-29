@@ -339,23 +339,80 @@ def get_achievement_definitions(game_info=None):
         ("Unstoppable Legion", "Reach 10,000,000 total army strength", "total_army_strength", 10_000_000, 20),
         ("Worldbreaker", "Reach 20,000,000 total army strength", "total_army_strength", 20_000_000, 28),
         ("Power Incarnate", "Reach 50,000,000 total army strength", "total_army_strength", 50_000_000, 40),
+        ("One-Hero Army", "One hero reaches 500,000 army strength", "strongest_hero_army", 500_000, 7),
+        ("Living Legend", "One hero reaches 5,000,000 army strength", "strongest_hero_army", 5_000_000, 18),
+        ("Supreme Commander", "One hero reaches 10,000,000 army strength", "strongest_hero_army", 10_000_000, 28),
+        ("Iron Garrison", "Reach 500,000 town-garrison strength", "total_garrison_army_strength", 500_000, 8),
+        ("Fortress Network", "Reach 2,000,000 town-garrison strength", "total_garrison_army_strength", 2_000_000, 16),
+        ("Balanced Forces", "Control 3 heroes with at least 250,000 army strength each", "heroes_over_250k", 3, 12),
+        ("Seven Samurai", "Control 7 heroes with at least 10,000 army strength each", "armed_heroes", 7, 10),
+        ("Arcane General", "One hero has 1,000,000 army strength and all three adventure spells", "arcane_generals", 1, 16),
+        ("Renaissance Hero", "One hero reaches 10 in every primary skill", "renaissance_heroes", 1, 12),
+        ("Master of Attack", "One hero reaches 30 Attack", "highest_attack", 30, 15),
+        ("Unbreakable", "One hero reaches 30 Defense", "highest_defense", 30, 15),
+        ("Archmage", "One hero reaches 30 Spell Power", "highest_power", 30, 15),
+        ("Omniscient", "One hero reaches 30 Knowledge", "highest_knowledge", 30, 15),
+        ("Veteran Company", "Control 3 heroes of at least level 15", "heroes_level_15", 3, 12),
+        ("Hall of Legends", "Control 3 heroes of at least level 20", "heroes_level_20", 3, 20),
+        ("Experience Leader", "Reach 1,000,000 combined hero experience", "combined_hero_experience", 1_000_000, 12),
+        ("First Expansion", "Control a second town", "town_count", 2, 3),
+        ("Landlord", "Control 6 towns", "town_count", 6, 8),
+        ("Realm Without Borders", "Control 16 towns", "town_count", 16, 25),
+        ("Rapid Expansion", "Control 4 towns by day 14", "rapid_expansion", 1, 12),
         ("Master Stockpiler", "Gather 100 of any non-gold resource", "largest_resource_stockpile", 100, 5),
+        ("Lumber Baron", "Accumulate 250 wood", "wood", 250, 7),
+        ("Ore Magnate", "Accumulate 250 ore", "ore", 250, 7),
+        ("Alchemist", "Accumulate 100 Mercury", "mercury", 100, 7),
+        ("Crystal Collector", "Accumulate 100 Crystals", "crystal", 100, 7),
+        ("Gem Hoarder", "Accumulate 100 Gems", "gems", 100, 7),
+        ("Sulfur Baron", "Accumulate 100 Sulfur", "sulfur", 100, 7),
+        ("Diverse Treasury", "Hold at least 50 of every non-gold resource", "diverse_treasury", 1, 15),
         ("Golden Treasury", "Accumulate 100,000 gold", "gold", 100_000, 6),
+        ("War Chest", "Accumulate 500,000 gold", "gold", 500_000, 10),
         ("Millionaire", "Accumulate 1,000,000 gold", "gold", 1_000_000, 15),
+        ("Dragon's Treasury", "Accumulate 2,000,000 gold", "gold", 2_000_000, 22),
+        ("Economic Superpower", "Hold 500,000 gold and 100 of every non-gold resource", "economic_superpower", 1, 30),
+        ("First Great Spell", "Gain any major adventure spell", "major_adventure_spells", 1, 4),
         ("Town Portal", "Gain access to Town Portal", "has_tp", 1, 7),
         ("Master of Flight", "Gain access to Fly", "has_fly", 1, 7),
         ("Dimension Traveller", "Gain access to Dimension Door", "has_dd", 1, 7),
         ("Master of the Adventure Map", "Gain all three adventure spells", "all_adventure_spells", 1, 18),
+        ("Portal Network", "Gain Town Portal while controlling at least 4 towns", "portal_network", 1, 12),
+        ("Arcane Supremacy", "Have Town Portal, Fly, and Dimension Door on 3 different heroes", "distinct_spell_masters", 1, 18),
+        ("Magical Dynasty", "Control 3 heroes that each know a major adventure spell", "major_spell_heroes", 3, 14),
         ("First Clue", "Discover an Obelisk", "visited_obelisks", 1, 3),
         ("Puzzle Seeker", "Discover 3 Obelisks", "visited_obelisks", 3, 6),
         ("Puzzle Scholar", "Discover 5 Obelisks", "visited_obelisks", 5, 10),
         ("Grail Hunter", "Discover 10 Obelisks", "visited_obelisks", 10, 18),
         ("Heroic Entourage", "Control 8 heroes", "heroes_controlled", 8, 8),
+        ("Dragon Hunter", "Conquer 2 Utopias within 2 days", "utopias_in_two_days", 2, 14),
+        ("Dragonbane", "Conquer 4 Utopias within 7 days", "utopias_in_seven_days", 4, 22),
+        ("Utopia Rush", "Conquer a Utopia by day 28", "utopia_rush", 1, 12),
+        ("One Champion", "With at least 100,000 total army strength, one hero commands at least 80% of hero army strength", "one_champion", 1, 10),
+        ("Council of War", "Three heroes each command at least 20% of hero army strength", "council_of_war", 1, 14),
+        ("Nomad", "Reach 1,000,000 army strength while controlling at most one town", "nomad", 1, 12),
+        ("Poor but Dangerous", "Lead army strength while holding the least gold", "poor_but_dangerous", 1, 12),
+        ("Rich but Harmless", "Hold at least 10,000 gold, lead in gold, and have the weakest army", "rich_but_harmless", 1, 10),
+        ("Mayor, Not General", "Lead in towns while having the weakest army", "mayor_not_general", 1, 10),
+        ("Turtle King", "With at least 100,000 total army strength, lead in garrison strength without leading hero-army strength", "turtle_king", 1, 10),
+        ("Glass Cannon", "Reach at least 10 Attack, lead in hero Attack, and trail in hero Defense", "glass_cannon", 1, 10),
+        ("Speedrunner", "Unlock 3 other achievements on the same day", "achievements_same_day", 3, 15),
     ]
     total_obelisks = int(game_info.get("total_obelisks", 0) or 0)
     if total_obelisks:
         definitions.append(
             ("Puzzle Master", "Discover every Obelisk", "visited_obelisks", total_obelisks, 30)
+        )
+        definitions.append(
+            ("Grail Vision", "Discover at least half of all Obelisks", "visited_obelisks", math.ceil(total_obelisks / 2), 16)
+        )
+        definitions.append(
+            ("Obelisk Dominance", "Discover more Obelisks than all opponents combined, with at least 5", "obelisk_dominance", 1, 22)
+        )
+    total_utopias = int(game_info.get("total_utopias", 0) or 0)
+    if total_utopias:
+        definitions.append(
+            ("Hoard Monopoly", "Conquer at least half of all Dragon Utopias", "visited_utopias", math.ceil(total_utopias / 2), 24)
         )
     map_size = int(game_info.get("map_size", 0) or 0)
     map_levels = int(game_info.get("levels", 1) or 1)
@@ -363,8 +420,9 @@ def get_achievement_definitions(game_info=None):
     if total_map_tiles:
         definitions.extend([
             ("Trailblazer", "Discover 10% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.10), 5),
-            ("Cartographer", "Discover 25% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.25), 10),
-            ("World Revealed", "Discover 50% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.50), 20),
+            ("Cartographer", "Discover 20% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.20), 10),
+            ("Seasoned Explorer", "Discover 30% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.30), 15),
+            ("Master Explorer", "Discover 50% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.50), 25),
         ])
     return definitions
 
@@ -384,16 +442,43 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
 
     numeric_player_columns = [
         "town_count", "visited_utopias", "visited_obelisks",
-        "total_army_strength", "tiles_explored", "wood", "ore", "mercury",
-        "sulfur", "crystal", "gems", "gold",
+        "total_army_strength", "total_hero_army_strength",
+        "total_garrison_army_strength", "tiles_explored", "wood", "ore",
+        "mercury", "sulfur", "crystal", "gems", "gold",
     ]
     for column in numeric_player_columns:
         if column not in players:
             players[column] = 0
         players[column] = pd.to_numeric(players[column], errors="coerce").fillna(0)
-    if "level" not in heroes:
-        heroes["level"] = 0
-    heroes["level"] = pd.to_numeric(heroes["level"], errors="coerce").fillna(0)
+    hero_numeric_columns = [
+        "level", "army_strength", "experience", "attack", "defense", "power", "knowledge"
+    ]
+    for column in hero_numeric_columns:
+        if column not in heroes:
+            heroes[column] = 0
+        heroes[column] = pd.to_numeric(heroes[column], errors="coerce").fillna(0)
+    for column in ["has_tp", "has_fly", "has_dd"]:
+        if column not in heroes:
+            heroes[column] = False
+        heroes[column] = heroes[column].map(
+            lambda value: value is True or value == 1
+            or (isinstance(value, str) and value.lower() == "true")
+        )
+    heroes["heroes_over_250k"] = (heroes["army_strength"] >= 250_000).astype(int)
+    heroes["armed_heroes"] = (heroes["army_strength"] >= 10_000).astype(int)
+    heroes["heroes_level_15"] = (heroes["level"] >= 15).astype(int)
+    heroes["heroes_level_20"] = (heroes["level"] >= 20).astype(int)
+    heroes["renaissance_heroes"] = (
+        (heroes[["attack", "defense", "power", "knowledge"]] >= 10).all(axis=1)
+    ).astype(int)
+    heroes["major_spell_count"] = heroes[["has_tp", "has_fly", "has_dd"]].sum(axis=1)
+    heroes["major_spell_heroes"] = (heroes["major_spell_count"] > 0).astype(int)
+    heroes["arcane_generals"] = (
+        (heroes["army_strength"] >= 1_000_000) & (heroes["major_spell_count"] == 3)
+    ).astype(int)
+    hero_totals = heroes.groupby(["day", "player_color"])["army_strength"].transform("sum")
+    heroes["army_share"] = np.where(hero_totals > 0, heroes["army_strength"] / hero_totals, 0)
+    heroes["council_members"] = (heroes["army_share"] >= 0.20).astype(int)
 
     hero_daily = heroes.groupby(["day", "player_color"]).agg(
         highest_hero_level=("level", "max"),
@@ -401,10 +486,54 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         has_tp=("has_tp", "max"),
         has_fly=("has_fly", "max"),
         has_dd=("has_dd", "max"),
+        strongest_hero_army=("army_strength", "max"),
+        combined_hero_experience=("experience", "sum"),
+        highest_attack=("attack", "max"),
+        highest_defense=("defense", "max"),
+        highest_power=("power", "max"),
+        highest_knowledge=("knowledge", "max"),
+        heroes_over_250k=("heroes_over_250k", "sum"),
+        armed_heroes=("armed_heroes", "sum"),
+        heroes_level_15=("heroes_level_15", "sum"),
+        heroes_level_20=("heroes_level_20", "sum"),
+        renaissance_heroes=("renaissance_heroes", "sum"),
+        major_spell_heroes=("major_spell_heroes", "sum"),
+        arcane_generals=("arcane_generals", "sum"),
+        council_members=("council_members", "sum"),
     ).reset_index() if not heroes.empty else pd.DataFrame()
+    distinct_spell_rows = []
+    for (day, player), group in heroes.groupby(["day", "player_color"]):
+        town_portal_heroes = group.loc[group["has_tp"], "hero_name"].unique()
+        fly_heroes = group.loc[group["has_fly"], "hero_name"].unique()
+        dimension_door_heroes = group.loc[group["has_dd"], "hero_name"].unique()
+        has_distinct_assignment = any(
+            len({town_portal_hero, fly_hero, dimension_door_hero}) == 3
+            for town_portal_hero in town_portal_heroes
+            for fly_hero in fly_heroes
+            for dimension_door_hero in dimension_door_heroes
+        )
+        distinct_spell_rows.append({
+            "day": day,
+            "player_color": player,
+            "distinct_spell_masters": int(has_distinct_assignment),
+        })
+    if not hero_daily.empty:
+        hero_daily = hero_daily.merge(
+            pd.DataFrame(distinct_spell_rows),
+            on=["day", "player_color"],
+            how="left",
+        )
     if not hero_daily.empty:
         players = players.merge(hero_daily, on=["day", "player_color"], how="left")
-    for column in ["highest_hero_level", "heroes_controlled", "has_tp", "has_fly", "has_dd"]:
+    hero_summary_columns = [
+        "highest_hero_level", "heroes_controlled", "has_tp", "has_fly", "has_dd",
+        "strongest_hero_army", "combined_hero_experience", "highest_attack",
+        "highest_defense", "highest_power", "highest_knowledge", "heroes_over_250k",
+        "armed_heroes", "heroes_level_15", "heroes_level_20", "renaissance_heroes",
+        "major_spell_heroes", "arcane_generals", "distinct_spell_masters",
+        "council_members",
+    ]
+    for column in hero_summary_columns:
         if column not in players:
             players[column] = 0
         players[column] = pd.to_numeric(players[column], errors="coerce").fillna(0)
@@ -412,11 +541,83 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
     resource_columns = ["wood", "ore", "mercury", "sulfur", "crystal", "gems"]
     players["largest_resource_stockpile"] = players[resource_columns].max(axis=1)
     players["all_adventure_spells"] = players[["has_tp", "has_fly", "has_dd"]].min(axis=1)
+    players["major_adventure_spells"] = players[["has_tp", "has_fly", "has_dd"]].max(axis=1)
+    players["diverse_treasury"] = (players[resource_columns].min(axis=1) >= 50).astype(int)
+    players["economic_superpower"] = (
+        (players["gold"] >= 500_000) & (players[resource_columns].min(axis=1) >= 100)
+    ).astype(int)
+    players["rapid_expansion"] = (
+        (players["town_count"] >= 4) & (players["day"] <= 14)
+    ).astype(int)
+    players["portal_network"] = ((players["has_tp"] > 0) & (players["town_count"] >= 4)).astype(int)
+    players["utopia_rush"] = ((players["visited_utopias"] >= 1) & (players["day"] <= 28)).astype(int)
+    players["one_champion"] = (
+        (players["total_army_strength"] >= 100_000)
+        & (players["total_hero_army_strength"] > 0)
+        & (players["strongest_hero_army"] >= players["total_hero_army_strength"] * 0.80)
+    ).astype(int)
+    players["council_of_war"] = (players["council_members"] >= 3).astype(int)
+    players["nomad"] = (
+        (players["total_army_strength"] >= 1_000_000) & (players["town_count"] <= 1)
+    ).astype(int)
+
+    players = players.sort_values(["player_color", "day"], kind="stable")
+    players["utopias_in_two_days"] = 0
+    players["utopias_in_seven_days"] = 0
+    for _player, indices in players.groupby("player_color").groups.items():
+        player_history = players.loc[indices].sort_values("day")
+        for index, row in player_history.iterrows():
+            before_two_day_window = player_history[
+                player_history["day"] < row["day"] - 1
+            ]
+            two_day_baseline = (
+                before_two_day_window["visited_utopias"].iloc[-1]
+                if not before_two_day_window.empty else 0
+            )
+            players.at[index, "utopias_in_two_days"] = (
+                row["visited_utopias"] - two_day_baseline
+            )
+            before_seven_day_window = player_history[
+                player_history["day"] < row["day"] - 6
+            ]
+            seven_day_baseline = (
+                before_seven_day_window["visited_utopias"].iloc[-1]
+                if not before_seven_day_window.empty else 0
+            )
+            players.at[index, "utopias_in_seven_days"] = (
+                row["visited_utopias"] - seven_day_baseline
+            )
+
+    day_groups = players.groupby("day")
+    max_army = day_groups["total_army_strength"].transform("max")
+    min_army = day_groups["total_army_strength"].transform("min")
+    max_gold = day_groups["gold"].transform("max")
+    min_gold = day_groups["gold"].transform("min")
+    max_towns = day_groups["town_count"].transform("max")
+    min_towns = day_groups["town_count"].transform("min")
+    max_garrison = day_groups["total_garrison_army_strength"].transform("max")
+    min_garrison = day_groups["total_garrison_army_strength"].transform("min")
+    max_hero_army = day_groups["total_hero_army_strength"].transform("max")
+    max_attack = day_groups["highest_attack"].transform("max")
+    min_attack = day_groups["highest_attack"].transform("min")
+    max_defense = day_groups["highest_defense"].transform("max")
+    min_defense = day_groups["highest_defense"].transform("min")
+    players["poor_but_dangerous"] = ((max_army > min_army) & (max_gold > min_gold) & (players["total_army_strength"] == max_army) & (players["gold"] == min_gold)).astype(int)
+    players["rich_but_harmless"] = ((players["gold"] >= 10_000) & (max_gold > min_gold) & (max_army > min_army) & (players["gold"] == max_gold) & (players["total_army_strength"] == min_army)).astype(int)
+    players["mayor_not_general"] = ((max_towns > min_towns) & (max_army > min_army) & (players["town_count"] == max_towns) & (players["total_army_strength"] == min_army)).astype(int)
+    players["turtle_king"] = ((players["total_army_strength"] >= 100_000) & (max_garrison > min_garrison) & (players["total_garrison_army_strength"] == max_garrison) & (players["total_hero_army_strength"] < max_hero_army)).astype(int)
+    players["glass_cannon"] = ((players["highest_attack"] >= 10) & (max_attack > min_attack) & (max_defense > min_defense) & (players["highest_attack"] == max_attack) & (players["highest_defense"] == min_defense)).astype(int)
+    opponent_obelisks = day_groups["visited_obelisks"].transform("sum") - players["visited_obelisks"]
+    players["obelisk_dominance"] = (
+        (players["visited_obelisks"] >= 5) & (players["visited_obelisks"] > opponent_obelisks)
+    ).astype(int)
 
     definitions = get_achievement_definitions(game_info)
 
     awards = []
     for key, description, column, threshold, points in definitions:
+        if column == "achievements_same_day":
+            continue
         qualifiers = players[players[column] >= threshold].copy()
         if qualifiers.empty:
             continue
@@ -428,6 +629,27 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
             "player": winner["player_color"],
             "day": int(winner["day"]),
             "points": points,
+        })
+    same_day_counts = {}
+    for award in awards:
+        count_key = (award["player"], award["day"])
+        same_day_counts[count_key] = same_day_counts.get(count_key, 0) + 1
+    speedrunner_candidates = [
+        (day, player_order[player], player)
+        for (player, day), count in same_day_counts.items()
+        if count >= 3
+    ]
+    if speedrunner_candidates:
+        day, _order, player = min(speedrunner_candidates)
+        speedrunner = next(
+            definition for definition in definitions if definition[0] == "Speedrunner"
+        )
+        awards.append({
+            "key": speedrunner[0],
+            "description": speedrunner[1],
+            "player": player,
+            "day": int(day),
+            "points": speedrunner[4],
         })
     return sorted(awards, key=lambda award: (award["day"], player_order[award["player"]]))
 
@@ -638,14 +860,14 @@ def build_player_power_scores(rankings):
                 scores[entry["player"]]["total"] += points
             continue
 
-        player_count = len(ranking["entries"])
+        placement_points = [15, 10, 7, 5, 4, 3, 2, 1]
         previous_value = None
         previous_points = None
         for position, entry in enumerate(ranking["entries"], start=1):
             if previous_value is not None and entry["value"] == previous_value:
                 points = previous_points
             else:
-                points = max(player_count - position + 1, 1)
+                points = placement_points[min(position - 1, len(placement_points) - 1)]
             scores[entry["player"]][ranking["group"]] += points
             scores[entry["player"]]["total"] += points
             previous_value = entry["value"]
@@ -836,6 +1058,12 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                 value=max(summary_days),
                 marks={int(day): str(int(day)) for day in summary_days},
                 tooltip={"placement": "bottom", "always_visible": True},
+            ),
+            dcc.Checklist(
+                id="toggle_achievement_guide",
+                options=[{"label": "Show Achievement Guide", "value": "show"}],
+                value=[],
+                style={"marginTop": "24px", "fontWeight": "600"},
             ),
             html.Div(
                 id="player_summary_table",
@@ -1295,8 +1523,9 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
     @app.callback(
         Output("player_summary_table", "children"),
         Input("player_summary_day_slider", "value"),
+        Input("toggle_achievement_guide", "value"),
     )
-    def update_player_summary(selected_day):
+    def update_player_summary(selected_day, achievement_guide_toggle):
         rankings = build_player_summary_rankings(
             df_players, df_heroes, selected_day, game_info
         )
@@ -1412,6 +1641,12 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             for position, entry in enumerate(ranking["entries"], start=1):
                 player = entry["player"]
                 color = PLAYER_COLORS.get(player, "#808080")
+                podium_backgrounds = {
+                    1: "linear-gradient(135deg, #fff3a6 0%, #e4b92f 100%)",
+                    2: "linear-gradient(135deg, #f4f6f8 0%, #b9c2cc 100%)",
+                    3: "linear-gradient(135deg, #85502d 0%, #4f2d1b 100%)",
+                }
+                podium_text_color = "#fff8eb" if position == 3 else "#263445"
                 value = int(entry["value"])
                 value_text = f"{value:,}"
                 if ranking["key"] == "strongest_hero_strength":
@@ -1448,7 +1683,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                             "marginLeft": "auto",
                             "fontVariantNumeric": "tabular-nums",
                             "fontWeight": "700",
-                            "color": "#263445",
+                            "color": podium_text_color,
                         },
                     ),
                 ], style={
@@ -1460,7 +1695,8 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                     "border": f"1px solid {color}55",
                     "borderLeft": f"4px solid {color}",
                     "borderRadius": "9px",
-                    "backgroundColor": "#ffffff",
+                    "background": podium_backgrounds.get(position, "#ffffff"),
+                    "color": podium_text_color,
                     "boxShadow": "0 2px 6px rgba(31, 45, 61, 0.08)",
                 }))
 
@@ -1564,7 +1800,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         return html.Div([
             html.H3("Overall Power Ranking", style={"marginBottom": "6px"}),
             html.P(
-                "Players earn placement points in each metric; tied values receive equal points. "
+                "Category placements award 15, 10, 7, 5, 4, 3, 2, and 1 points; tied values receive equal points. "
                 "Dimension Door, Town Portal, and Fly are worth 5 points each.",
                 style={"color": "#687386", "marginTop": "0"},
             ),
@@ -1576,12 +1812,14 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             }),
             html.H3("Category Rankings", style={"marginBottom": "10px"}),
             ranking_table,
-            html.H3("Achievement Guide", style={"marginTop": "28px", "marginBottom": "6px"}),
-            html.P(
-                "Achievements already claimed by the selected day are greyed out.",
-                style={"color": "#687386", "marginTop": "0"},
-            ),
-            achievement_guide,
+            html.Div([
+                html.H3("Achievement Guide", style={"marginTop": "28px", "marginBottom": "6px"}),
+                html.P(
+                    "Achievements already claimed by the selected day are greyed out.",
+                    style={"color": "#687386", "marginTop": "0"},
+                ),
+                achievement_guide,
+            ], style={"display": "block" if "show" in (achievement_guide_toggle or []) else "none"}),
         ])
 
     # Pie chart for town ownership (latest day)
