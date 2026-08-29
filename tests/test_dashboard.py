@@ -3,6 +3,7 @@ import unittest
 import pandas as pd
 
 from dashboard import (
+    build_achievement_awards,
     build_player_power_scores,
     build_player_summary_rankings,
     format_game_info_value,
@@ -161,7 +162,8 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
             scores_by_player["Red"]["total"],
             scores_by_player["Red"]["Military"]
             + scores_by_player["Red"]["Map control"]
-            + scores_by_player["Red"]["Economic"],
+            + scores_by_player["Red"]["Economic"]
+            + scores_by_player["Red"]["Achievements"],
         )
         self.assertGreaterEqual(scores_by_player["Red"]["Map control"], 15)
 
@@ -183,6 +185,62 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
         self.assertEqual(3, scores["Red"]["Economic"])
         self.assertEqual(3, scores["Blue"]["Economic"])
         self.assertEqual(1, scores["Tan"]["Economic"])
+
+
+class AchievementTests(unittest.TestCase):
+    def test_awards_each_achievement_once_using_turn_order_for_ties(self):
+        players = pd.DataFrame([
+            {
+                "day": 1, "player_color": "Red", "town_count": 4,
+                "visited_utopias": 1, "visited_obelisks": 1,
+                "total_army_strength": 500_000, "wood": 100,
+            },
+            {
+                "day": 1, "player_color": "Blue", "town_count": 4,
+                "visited_utopias": 1, "visited_obelisks": 1,
+                "total_army_strength": 500_000, "wood": 100,
+            },
+            {
+                "day": 2, "player_color": "Blue", "town_count": 5,
+                "visited_utopias": 10, "visited_obelisks": 3,
+                "total_army_strength": 1_000_000,
+            },
+        ]).fillna(0)
+        heroes = pd.DataFrame([
+            {
+                "day": 1, "player_color": "Red", "hero_name": "Gelu",
+                "level": 10, "has_tp": True, "has_fly": True, "has_dd": True,
+            },
+            {
+                "day": 1, "player_color": "Blue", "hero_name": "Solmyr",
+                "level": 10, "has_tp": True, "has_fly": True, "has_dd": True,
+            },
+        ])
+
+        awards = build_achievement_awards(
+            players, heroes, {"total_obelisks": 3}
+        )
+        by_key = {award["key"]: award for award in awards}
+
+        self.assertEqual("Red", by_key["First Utopia"]["player"])
+        self.assertEqual("Blue", by_key["Utopia Raider"]["player"])
+        self.assertEqual("Blue", by_key["Dragon Hoard Hunter"]["player"])
+        self.assertEqual("Blue", by_key["Utopia Overlord"]["player"])
+        self.assertEqual("Red", by_key["Four-Town Realm"]["player"])
+        self.assertEqual("Red", by_key["Veteran Hero"]["player"])
+        self.assertEqual("Red", by_key["Master of the Adventure Map"]["player"])
+        self.assertEqual("Blue", by_key["Puzzle Seeker"]["player"])
+        self.assertEqual("Blue", by_key["Puzzle Master"]["player"])
+        self.assertEqual(2, by_key["Puzzle Master"]["day"])
+
+        rankings = build_player_summary_rankings(
+            players, heroes, 2, {"total_obelisks": 3}
+        )
+        achievement_ranking = next(
+            ranking for ranking in rankings if ranking["key"] == "achievements"
+        )
+        self.assertEqual("Achievements", achievement_ranking["group"])
+        self.assertGreater(achievement_ranking["entries"][0]["value"], 0)
 
 
 if __name__ == "__main__":
