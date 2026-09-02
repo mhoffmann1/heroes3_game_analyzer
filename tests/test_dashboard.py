@@ -6,6 +6,7 @@ from dashboard import (
     build_achievement_awards,
     build_player_power_scores,
     build_player_summary_rankings,
+    calculate_hybrid_metric_scores,
     format_game_info_value,
     get_top_heroes_by_army_strength,
 )
@@ -179,12 +180,36 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
             ],
         }]
 
+        metric_scores = calculate_hybrid_metric_scores(rankings[0]["entries"])
+        self.assertEqual(100, metric_scores["Red"]["points"])
+        self.assertEqual(100, metric_scores["Blue"]["points"])
+        self.assertEqual(53, metric_scores["Tan"]["points"])
+
         scores = {
             score["player"]: score for score in build_player_power_scores(rankings)
         }
-        self.assertEqual(15, scores["Red"]["Economic"])
-        self.assertEqual(15, scores["Blue"]["Economic"])
-        self.assertEqual(7, scores["Tan"]["Economic"])
+        self.assertEqual(30, scores["Red"]["Economic"])
+        self.assertEqual(30, scores["Blue"]["Economic"])
+        self.assertEqual(16, scores["Tan"]["Economic"])
+
+    def test_achievement_points_are_added_directly_to_total(self):
+        rankings = [{
+            "key": "achievements",
+            "label": "Achievements",
+            "group": "Achievements",
+            "entries": [
+                {"player": "Red", "value": 20},
+                {"player": "Blue", "value": 10},
+            ],
+        }]
+
+        scores = {
+            score["player"]: score for score in build_player_power_scores(rankings)
+        }
+
+        self.assertEqual(20, scores["Red"]["Achievements"])
+        self.assertEqual(10, scores["Blue"]["Achievements"])
+        self.assertEqual(20, scores["Red"]["total"])
 
 
 class AchievementTests(unittest.TestCase):
@@ -241,7 +266,7 @@ class AchievementTests(unittest.TestCase):
         self.assertEqual(2, awards["One Champion"]["day"])
         self.assertEqual(2, awards["Turtle King"]["day"])
 
-    def test_awards_each_achievement_once_using_turn_order_for_ties(self):
+    def test_awards_all_first_day_qualifiers_for_achievement_ties(self):
         players = pd.DataFrame([
             {
                 "day": 1, "player_color": "Red", "town_count": 4,
@@ -273,18 +298,32 @@ class AchievementTests(unittest.TestCase):
         awards = build_achievement_awards(
             players, heroes, {"total_obelisks": 3}
         )
-        by_key = {award["key"]: award for award in awards}
+        by_key = {}
+        for award in awards:
+            by_key.setdefault(award["key"], []).append(award)
 
-        self.assertEqual("Red", by_key["First Utopia"]["player"])
-        self.assertEqual("Blue", by_key["Utopia Raider"]["player"])
-        self.assertEqual("Blue", by_key["Dragon Hoard Hunter"]["player"])
-        self.assertEqual("Blue", by_key["Utopia Overlord"]["player"])
-        self.assertEqual("Red", by_key["Four-Town Realm"]["player"])
-        self.assertEqual("Red", by_key["Veteran Hero"]["player"])
-        self.assertEqual("Red", by_key["Master of the Adventure Map"]["player"])
-        self.assertEqual("Blue", by_key["Puzzle Seeker"]["player"])
-        self.assertEqual("Blue", by_key["Puzzle Master"]["player"])
-        self.assertEqual(2, by_key["Puzzle Master"]["day"])
+        self.assertEqual(
+            {"Red", "Blue"},
+            {award["player"] for award in by_key["First Utopia"]},
+        )
+        self.assertEqual("Blue", by_key["Utopia Raider"][0]["player"])
+        self.assertEqual("Blue", by_key["Dragon Hoard Hunter"][0]["player"])
+        self.assertEqual("Blue", by_key["Utopia Overlord"][0]["player"])
+        self.assertEqual(
+            {"Red", "Blue"},
+            {award["player"] for award in by_key["Four-Town Realm"]},
+        )
+        self.assertEqual(
+            {"Red", "Blue"},
+            {award["player"] for award in by_key["Veteran Hero"]},
+        )
+        self.assertEqual(
+            {"Red", "Blue"},
+            {award["player"] for award in by_key["Master of the Adventure Map"]},
+        )
+        self.assertEqual("Blue", by_key["Puzzle Seeker"][0]["player"])
+        self.assertEqual("Blue", by_key["Puzzle Master"][0]["player"])
+        self.assertEqual(2, by_key["Puzzle Master"][0]["day"])
 
         rankings = build_player_summary_rankings(
             players, heroes, 2, {"total_obelisks": 3}

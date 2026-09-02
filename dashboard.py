@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import re
+from collections import defaultdict
 
 import dash
 import numpy as np
@@ -424,7 +425,23 @@ def get_achievement_definitions(game_info=None):
             ("Seasoned Explorer", "Discover 30% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.30), 15),
             ("Master Explorer", "Discover 50% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.50), 25),
         ])
-    return definitions
+    def difficulty_points(previous_value):
+        if previous_value <= 5:
+            return 1
+        if previous_value <= 10:
+            return 2
+        if previous_value <= 18:
+            return 3
+        if previous_value <= 29:
+            return 4
+        return 5
+
+    # Keep the relative difficulty already assigned to every achievement while
+    # expressing rewards on a compact, easier-to-balance 1–5 scale.
+    return [
+        (name, requirement, metric, threshold, difficulty_points(points))
+        for name, requirement, metric, threshold, points in definitions
+    ]
 
 
 def build_achievement_awards(df_players, df_heroes, game_info=None):
@@ -621,36 +638,41 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         qualifiers = players[players[column] >= threshold].copy()
         if qualifiers.empty:
             continue
-        qualifiers["player_order"] = qualifiers["player_color"].map(player_order)
-        winner = qualifiers.sort_values(["day", "player_order"], kind="stable").iloc[0]
-        awards.append({
-            "key": key,
-            "description": description,
-            "player": winner["player_color"],
-            "day": int(winner["day"]),
-            "points": points,
-        })
+        first_day = qualifiers["day"].min()
+        first_day_winners = qualifiers[
+            qualifiers["day"] == first_day
+        ].drop_duplicates("player_color", keep="first")
+        for winner in first_day_winners.itertuples(index=False):
+            awards.append({
+                "key": key,
+                "description": description,
+                "player": winner.player_color,
+                "day": int(first_day),
+                "points": points,
+            })
     same_day_counts = {}
     for award in awards:
         count_key = (award["player"], award["day"])
         same_day_counts[count_key] = same_day_counts.get(count_key, 0) + 1
     speedrunner_candidates = [
-        (day, player_order[player], player)
+        (day, player)
         for (player, day), count in same_day_counts.items()
         if count >= 3
     ]
     if speedrunner_candidates:
-        day, _order, player = min(speedrunner_candidates)
+        first_speedrunner_day = min(day for day, _player in speedrunner_candidates)
         speedrunner = next(
             definition for definition in definitions if definition[0] == "Speedrunner"
         )
-        awards.append({
-            "key": speedrunner[0],
-            "description": speedrunner[1],
-            "player": player,
-            "day": int(day),
-            "points": speedrunner[4],
-        })
+        for day, player in speedrunner_candidates:
+            if day == first_speedrunner_day:
+                awards.append({
+                    "key": speedrunner[0],
+                    "description": speedrunner[1],
+                    "player": player,
+                    "day": int(day),
+                    "points": speedrunner[4],
+                })
     return sorted(awards, key=lambda award: (award["day"], player_order[award["player"]]))
 
 
@@ -826,8 +848,39 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day, game_info
     return rankings
 
 
+def calculate_hybrid_metric_scores(entries, zero_draw=True):
+    """Combine a podium bonus with progress relative to the metric leader."""
+    if not entries:
+        return {}
+
+    placement_bonuses = [40, 30, 23, 17, 12, 8, 5, 3]
+    leader_value = entries[0]["value"]
+    results = {}
+    previous_value = None
+    previous_rank = None
+    for position, entry in enumerate(entries, start=1):
+        rank = (
+            previous_rank
+            if previous_value is not None and entry["value"] == previous_value
+            else position
+        )
+        if leader_value == 0:
+            points = 100.0 if zero_draw else 0.0
+        else:
+            placement = placement_bonuses[min(rank - 1, len(placement_bonuses) - 1)]
+            progress = 60.0 * max(entry["value"], 0) / leader_value
+            points = placement + progress
+        results[entry["player"]] = {
+            "points": int(math.floor(points + 0.5)),
+            "rank": rank,
+        }
+        previous_value = entry["value"]
+        previous_rank = rank
+    return results
+
+
 def build_player_power_scores(rankings):
-    """Award placement points and return category and overall player scores."""
+    """Return weighted 40/30/30 section scores plus achievement bonuses."""
     if not rankings:
         return []
 
@@ -848,30 +901,37 @@ def build_player_power_scores(rankings):
         for player in players
     }
 
+    section_metric_counts = {
+        group: sum(ranking["group"] == group for ranking in rankings)
+        for group in ["Military", "Map control", "Economic"]
+    }
+    section_weights = {
+        "Military": 40,
+        "Map control": 30,
+        "Economic": 30,
+    }
     for ranking in rankings:
-        if ranking["key"] in {"adventure_spells", "achievements"}:
+        if ranking["key"] == "achievements":
             for entry in ranking["entries"]:
-                points = (
-                    int(entry["value"]) * 5
-                    if ranking["key"] == "adventure_spells"
-                    else int(entry["value"])
-                )
-                scores[entry["player"]][ranking["group"]] += points
-                scores[entry["player"]]["total"] += points
+                scores[entry["player"]]["Achievements"] = entry["value"]
             continue
+        metric_scores = calculate_hybrid_metric_scores(ranking["entries"])
+        for entry in ranking["entries"]:
+            scores[entry["player"]][ranking["group"]] += metric_scores[
+                entry["player"]
+            ]["points"]
 
-        placement_points = [15, 10, 7, 5, 4, 3, 2, 1]
-        previous_value = None
-        previous_points = None
-        for position, entry in enumerate(ranking["entries"], start=1):
-            if previous_value is not None and entry["value"] == previous_value:
-                points = previous_points
-            else:
-                points = placement_points[min(position - 1, len(placement_points) - 1)]
-            scores[entry["player"]][ranking["group"]] += points
-            scores[entry["player"]]["total"] += points
-            previous_value = entry["value"]
-            previous_points = points
+    for player in players:
+        for group, weight in section_weights.items():
+            metric_count = section_metric_counts[group]
+            section_average = (
+                scores[player][group] / metric_count if metric_count else 0
+            )
+            scores[player][group] = int(math.floor(
+                section_average * weight / 100 + 0.5
+            ))
+            scores[player]["total"] += scores[player][group]
+        scores[player]["total"] += scores[player]["Achievements"]
 
     player_order = {
         player: index for index, player in enumerate(
@@ -885,6 +945,11 @@ def build_player_power_scores(rankings):
             player_order.get(score["player"], len(player_order)),
         ),
     )
+
+
+def format_points(value):
+    """Format proportional scores without unnecessary trailing zeroes."""
+    return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
 def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, df_utopias, port):
@@ -1568,7 +1633,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                         style={"fontSize": "18px", "fontWeight": "800", "color": color},
                     ),
                     html.Span(
-                        f"{score['total']} pts",
+                        f"{format_points(score['total'])} pts",
                         style={
                             "marginLeft": "auto",
                             "fontSize": "18px",
@@ -1578,10 +1643,10 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                     ),
                 ], style={"display": "flex", "alignItems": "center", "gap": "8px"}),
                 html.Div([
-                    html.Span(f"⚔️ Military {score['Military']}"),
-                    html.Span(f"🗺️ Map {score['Map control']}"),
-                    html.Span(f"🪙 Economy {score['Economic']}"),
-                    html.Span(f"🏆 Achievements {score['Achievements']}"),
+                    html.Span(f"⚔️ Military {format_points(score['Military'])}/40"),
+                    html.Span(f"🗺️ Map {format_points(score['Map control'])}/30"),
+                    html.Span(f"🪙 Economy {format_points(score['Economic'])}/30"),
+                    html.Span(f"🏆 Achievement bonus +{format_points(score['Achievements'])}"),
                 ], style={
                     "display": "flex",
                     "flexWrap": "wrap",
@@ -1638,31 +1703,43 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                     },
                 )))
             badges = []
+            hybrid_scores = calculate_hybrid_metric_scores(
+                ranking["entries"], zero_draw=ranking["key"] != "achievements"
+            )
             for position, entry in enumerate(ranking["entries"], start=1):
                 player = entry["player"]
+                metric_result = hybrid_scores[player]
+                rank = metric_result["rank"]
                 color = PLAYER_COLORS.get(player, "#808080")
                 podium_backgrounds = {
                     1: "linear-gradient(135deg, #fff3a6 0%, #e4b92f 100%)",
                     2: "linear-gradient(135deg, #f4f6f8 0%, #b9c2cc 100%)",
                     3: "linear-gradient(135deg, #85502d 0%, #4f2d1b 100%)",
                 }
-                podium_text_color = "#fff8eb" if position == 3 else "#263445"
+                podium_text_color = "#fff8eb" if rank == 3 else "#263445"
                 value = int(entry["value"])
-                value_text = f"{value:,}"
+                if ranking["key"] == "achievements":
+                    metric_points = value
+                else:
+                    metric_points = metric_result["points"]
+                value_text = f"{value:,} · {format_points(metric_points)} pts"
                 if ranking["key"] == "strongest_hero_strength":
-                    value_text = f"{entry['hero']} · {value:,}"
+                    value_text = f"{entry['hero']} · {value:,} · {format_points(metric_points)} pts"
                 elif ranking["key"] == "adventure_spells":
                     spell_names = ", ".join(entry["spells"]) or "None"
-                    value_text = f"{spell_names} · {value * 5} pts"
+                    value_text = f"{spell_names} · {format_points(metric_points)} pts"
                 elif ranking["key"] == "achievements":
                     achievement_names = ", ".join(
                         f"{award['key']} (day {award['day']}, +{award['points']})"
                         for award in entry["achievements"]
                     ) or "None yet"
-                    value_text = f"{value} pts · {achievement_names}"
+                    value_text = (
+                        f"+{value} overall pts · "
+                        f"{achievement_names}"
+                    )
                 badges.append(html.Div([
                     html.Span(
-                        medals.get(position, f"#{position}"),
+                        medals.get(rank, f"#{rank}"),
                         style={"minWidth": "30px", "fontWeight": "700"},
                     ),
                     html.Span(style={
@@ -1695,7 +1772,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                     "border": f"1px solid {color}55",
                     "borderLeft": f"4px solid {color}",
                     "borderRadius": "9px",
-                    "background": podium_backgrounds.get(position, "#ffffff"),
+                    "background": podium_backgrounds.get(rank, "#ffffff"),
                     "color": podium_text_color,
                     "boxShadow": "0 2px 6px rgba(31, 45, 61, 0.08)",
                 }))
@@ -1745,16 +1822,26 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             "backgroundColor": "rgba(255, 255, 255, 0.75)",
         })
 
-        unlocked_by_name = {
-            award["key"]: award
-            for award in build_achievement_awards(df_players, df_heroes, game_info)
-            if award["day"] <= selected_day
-        }
+        unlocked_by_name = defaultdict(list)
+        for award in build_achievement_awards(df_players, df_heroes, game_info):
+            if award["day"] <= selected_day:
+                unlocked_by_name[award["key"]].append(award)
         achievement_guide_rows = []
         for name, requirement, _column, _threshold, points in get_achievement_definitions(game_info):
-            award = unlocked_by_name.get(name)
-            fulfilled = award is not None
-            winner_color = PLAYER_COLORS.get(award["player"], "#808080") if award else None
+            achievement_winners = unlocked_by_name.get(name, [])
+            fulfilled = bool(achievement_winners)
+            winner_color = (
+                PLAYER_COLORS.get(achievement_winners[0]["player"], "#808080")
+                if len(achievement_winners) == 1 else "#666666"
+            )
+            status_text = "Available"
+            if fulfilled:
+                winner_names = ", ".join(
+                    award["player"] for award in achievement_winners
+                )
+                status_text = (
+                    f"✓ {winner_names} · day {achievement_winners[0]['day']}"
+                )
             achievement_guide_rows.append(html.Tr([
                 html.Td(name, style={"padding": "11px 14px", "fontWeight": "800"}),
                 html.Td(requirement, style={"padding": "11px 14px"}),
@@ -1765,7 +1852,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                 }),
                 html.Td(
                     html.Span(
-                        f"✓ {award['player']} · day {award['day']}" if fulfilled else "Available",
+                        status_text,
                         style={
                             "fontWeight": "800",
                             "color": winner_color if fulfilled else "#8a641c",
@@ -1800,8 +1887,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         return html.Div([
             html.H3("Overall Power Ranking", style={"marginBottom": "6px"}),
             html.P(
-                "Category placements award 15, 10, 7, 5, 4, 3, 2, and 1 points; tied values receive equal points. "
-                "Dimension Door, Town Portal, and Fly are worth 5 points each.",
+                "Military, Map Control, and Economic metrics combine a 40-point placement bonus with up to 60 leader-relative progress points, then contribute up to 40, 30, and 30 points. Every 1–5 point achievement is added directly as an overall-score bonus.",
                 style={"color": "#687386", "marginTop": "0"},
             ),
             html.Div(power_cards, style={
