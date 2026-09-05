@@ -8,6 +8,7 @@ from dashboard import (
     build_player_summary_rankings,
     calculate_hybrid_metric_scores,
     format_game_info_value,
+    get_achievement_definitions,
     get_top_heroes_by_army_strength,
 )
 
@@ -188,9 +189,22 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
         scores = {
             score["player"]: score for score in build_player_power_scores(rankings)
         }
-        self.assertEqual(30, scores["Red"]["Economic"])
-        self.assertEqual(30, scores["Blue"]["Economic"])
-        self.assertEqual(16, scores["Tan"]["Economic"])
+        self.assertEqual(20, scores["Red"]["Economic"])
+        self.assertEqual(20, scores["Blue"]["Economic"])
+        self.assertEqual(11, scores["Tan"]["Economic"])
+
+    def test_zero_contribution_receives_no_placement_points(self):
+        entries = [
+            {"player": "Red", "value": 2},
+            {"player": "Blue", "value": 0},
+            {"player": "Tan", "value": 0},
+        ]
+
+        metric_scores = calculate_hybrid_metric_scores(entries)
+
+        self.assertEqual(100, metric_scores["Red"]["points"])
+        self.assertEqual(0, metric_scores["Blue"]["points"])
+        self.assertEqual(0, metric_scores["Tan"]["points"])
 
     def test_achievement_points_are_added_directly_to_total(self):
         rankings = [{
@@ -213,6 +227,17 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
 
 
 class AchievementTests(unittest.TestCase):
+    def test_definitions_contain_final_one_to_five_point_values(self):
+        definitions = get_achievement_definitions({
+            "total_obelisks": 10,
+            "total_utopias": 8,
+            "map_size": 72,
+            "levels": 2,
+        })
+
+        self.assertTrue(definitions)
+        self.assertTrue(all(1 <= definition[4] <= 5 for definition in definitions))
+
     def test_arcane_supremacy_requires_three_distinct_heroes(self):
         players = pd.DataFrame([
             {"day": 1, "player_color": "Red"},

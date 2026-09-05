@@ -323,125 +323,109 @@ def get_achievement_definitions(game_info=None):
     """Return achievement names, requirements, source metrics and point values."""
     game_info = game_info or {}
     definitions = [
-        ("First Utopia", "Conquer a Dragon Utopia", "visited_utopias", 1, 8),
-        ("Utopia Raider", "Conquer 3 Dragon Utopias", "visited_utopias", 3, 12),
-        ("Dragon Hoard Hunter", "Conquer 5 Dragon Utopias", "visited_utopias", 5, 18),
-        ("Utopia Overlord", "Conquer 10 Dragon Utopias", "visited_utopias", 10, 30),
-        ("Four-Town Realm", "Control 4 towns", "town_count", 4, 5),
-        ("Eight-Town Kingdom", "Control 8 towns", "town_count", 8, 10),
-        ("Twelve-Town Empire", "Control 12 towns", "town_count", 12, 18),
-        ("Rising Hero", "Raise a hero to level 5", "highest_hero_level", 5, 3),
-        ("Veteran Hero", "Raise a hero to level 10", "highest_hero_level", 10, 6),
-        ("Legendary Hero", "Raise a hero to level 20", "highest_hero_level", 20, 12),
-        ("Mythic Hero", "Raise a hero to level 30", "highest_hero_level", 30, 20),
-        ("Mighty Host", "Reach 500,000 total army strength", "total_army_strength", 500_000, 5),
-        ("Million-Strong Army", "Reach 1,000,000 total army strength", "total_army_strength", 1_000_000, 8),
-        ("Army of Conquest", "Reach 5,000,000 total army strength", "total_army_strength", 5_000_000, 14),
-        ("Unstoppable Legion", "Reach 10,000,000 total army strength", "total_army_strength", 10_000_000, 20),
-        ("Worldbreaker", "Reach 20,000,000 total army strength", "total_army_strength", 20_000_000, 28),
-        ("Power Incarnate", "Reach 50,000,000 total army strength", "total_army_strength", 50_000_000, 40),
-        ("One-Hero Army", "One hero reaches 500,000 army strength", "strongest_hero_army", 500_000, 7),
-        ("Living Legend", "One hero reaches 5,000,000 army strength", "strongest_hero_army", 5_000_000, 18),
-        ("Supreme Commander", "One hero reaches 10,000,000 army strength", "strongest_hero_army", 10_000_000, 28),
-        ("Iron Garrison", "Reach 500,000 town-garrison strength", "total_garrison_army_strength", 500_000, 8),
-        ("Fortress Network", "Reach 2,000,000 town-garrison strength", "total_garrison_army_strength", 2_000_000, 16),
-        ("Balanced Forces", "Control 3 heroes with at least 250,000 army strength each", "heroes_over_250k", 3, 12),
-        ("Seven Samurai", "Control 7 heroes with at least 10,000 army strength each", "armed_heroes", 7, 10),
-        ("Arcane General", "One hero has 1,000,000 army strength and all three adventure spells", "arcane_generals", 1, 16),
-        ("Renaissance Hero", "One hero reaches 10 in every primary skill", "renaissance_heroes", 1, 12),
-        ("Master of Attack", "One hero reaches 30 Attack", "highest_attack", 30, 15),
-        ("Unbreakable", "One hero reaches 30 Defense", "highest_defense", 30, 15),
-        ("Archmage", "One hero reaches 30 Spell Power", "highest_power", 30, 15),
-        ("Omniscient", "One hero reaches 30 Knowledge", "highest_knowledge", 30, 15),
-        ("Veteran Company", "Control 3 heroes of at least level 15", "heroes_level_15", 3, 12),
-        ("Hall of Legends", "Control 3 heroes of at least level 20", "heroes_level_20", 3, 20),
-        ("Experience Leader", "Reach 1,000,000 combined hero experience", "combined_hero_experience", 1_000_000, 12),
-        ("First Expansion", "Control a second town", "town_count", 2, 3),
-        ("Landlord", "Control 6 towns", "town_count", 6, 8),
-        ("Realm Without Borders", "Control 16 towns", "town_count", 16, 25),
-        ("Rapid Expansion", "Control 4 towns by day 14", "rapid_expansion", 1, 12),
-        ("Master Stockpiler", "Gather 100 of any non-gold resource", "largest_resource_stockpile", 100, 5),
-        ("Lumber Baron", "Accumulate 250 wood", "wood", 250, 7),
-        ("Ore Magnate", "Accumulate 250 ore", "ore", 250, 7),
-        ("Alchemist", "Accumulate 100 Mercury", "mercury", 100, 7),
-        ("Crystal Collector", "Accumulate 100 Crystals", "crystal", 100, 7),
-        ("Gem Hoarder", "Accumulate 100 Gems", "gems", 100, 7),
-        ("Sulfur Baron", "Accumulate 100 Sulfur", "sulfur", 100, 7),
-        ("Diverse Treasury", "Hold at least 50 of every non-gold resource", "diverse_treasury", 1, 15),
-        ("Golden Treasury", "Accumulate 100,000 gold", "gold", 100_000, 6),
-        ("War Chest", "Accumulate 500,000 gold", "gold", 500_000, 10),
-        ("Millionaire", "Accumulate 1,000,000 gold", "gold", 1_000_000, 15),
-        ("Dragon's Treasury", "Accumulate 2,000,000 gold", "gold", 2_000_000, 22),
-        ("Economic Superpower", "Hold 500,000 gold and 100 of every non-gold resource", "economic_superpower", 1, 30),
-        ("First Great Spell", "Gain any major adventure spell", "major_adventure_spells", 1, 4),
-        ("Town Portal", "Gain access to Town Portal", "has_tp", 1, 7),
-        ("Master of Flight", "Gain access to Fly", "has_fly", 1, 7),
-        ("Dimension Traveller", "Gain access to Dimension Door", "has_dd", 1, 7),
-        ("Master of the Adventure Map", "Gain all three adventure spells", "all_adventure_spells", 1, 18),
-        ("Portal Network", "Gain Town Portal while controlling at least 4 towns", "portal_network", 1, 12),
-        ("Arcane Supremacy", "Have Town Portal, Fly, and Dimension Door on 3 different heroes", "distinct_spell_masters", 1, 18),
-        ("Magical Dynasty", "Control 3 heroes that each know a major adventure spell", "major_spell_heroes", 3, 14),
-        ("First Clue", "Discover an Obelisk", "visited_obelisks", 1, 3),
-        ("Puzzle Seeker", "Discover 3 Obelisks", "visited_obelisks", 3, 6),
-        ("Puzzle Scholar", "Discover 5 Obelisks", "visited_obelisks", 5, 10),
-        ("Grail Hunter", "Discover 10 Obelisks", "visited_obelisks", 10, 18),
-        ("Heroic Entourage", "Control 8 heroes", "heroes_controlled", 8, 8),
-        ("Dragon Hunter", "Conquer 2 Utopias within 2 days", "utopias_in_two_days", 2, 14),
-        ("Dragonbane", "Conquer 4 Utopias within 7 days", "utopias_in_seven_days", 4, 22),
-        ("Utopia Rush", "Conquer a Utopia by day 28", "utopia_rush", 1, 12),
-        ("One Champion", "With at least 100,000 total army strength, one hero commands at least 80% of hero army strength", "one_champion", 1, 10),
-        ("Council of War", "Three heroes each command at least 20% of hero army strength", "council_of_war", 1, 14),
-        ("Nomad", "Reach 1,000,000 army strength while controlling at most one town", "nomad", 1, 12),
-        ("Poor but Dangerous", "Lead army strength while holding the least gold", "poor_but_dangerous", 1, 12),
-        ("Rich but Harmless", "Hold at least 10,000 gold, lead in gold, and have the weakest army", "rich_but_harmless", 1, 10),
-        ("Mayor, Not General", "Lead in towns while having the weakest army", "mayor_not_general", 1, 10),
-        ("Turtle King", "With at least 100,000 total army strength, lead in garrison strength without leading hero-army strength", "turtle_king", 1, 10),
-        ("Glass Cannon", "Reach at least 10 Attack, lead in hero Attack, and trail in hero Defense", "glass_cannon", 1, 10),
-        ("Speedrunner", "Unlock 3 other achievements on the same day", "achievements_same_day", 3, 15),
+        ("First Utopia", "Conquer a Dragon Utopia", "visited_utopias", 1, 2),
+        ("Utopia Raider", "Conquer 3 Dragon Utopias", "visited_utopias", 3, 3),
+        ("Dragon Hoard Hunter", "Conquer 5 Dragon Utopias", "visited_utopias", 5, 3),
+        ("Utopia Overlord", "Conquer 10 Dragon Utopias", "visited_utopias", 10, 5),
+        ("Four-Town Realm", "Control 4 towns", "town_count", 4, 1),
+        ("Eight-Town Kingdom", "Control 8 towns", "town_count", 8, 2),
+        ("Twelve-Town Empire", "Control 12 towns", "town_count", 12, 3),
+        ("Rising Hero", "Raise a hero to level 5", "highest_hero_level", 5, 1),
+        ("Veteran Hero", "Raise a hero to level 10", "highest_hero_level", 10, 2),
+        ("Legendary Hero", "Raise a hero to level 20", "highest_hero_level", 20, 3),
+        ("Mythic Hero", "Raise a hero to level 30", "highest_hero_level", 30, 4),
+        ("Mighty Host", "Reach 500,000 total army strength", "total_army_strength", 500_000, 1),
+        ("Million-Strong Army", "Reach 1,000,000 total army strength", "total_army_strength", 1_000_000, 2),
+        ("Army of Conquest", "Reach 5,000,000 total army strength", "total_army_strength", 5_000_000, 3),
+        ("Unstoppable Legion", "Reach 10,000,000 total army strength", "total_army_strength", 10_000_000, 4),
+        ("Worldbreaker", "Reach 20,000,000 total army strength", "total_army_strength", 20_000_000, 4),
+        ("Power Incarnate", "Reach 50,000,000 total army strength", "total_army_strength", 50_000_000, 5),
+        ("One-Hero Army", "One hero reaches 500,000 army strength", "strongest_hero_army", 500_000, 2),
+        ("Living Legend", "One hero reaches 5,000,000 army strength", "strongest_hero_army", 5_000_000, 3),
+        ("Supreme Commander", "One hero reaches 10,000,000 army strength", "strongest_hero_army", 10_000_000, 4),
+        ("Iron Garrison", "Reach 500,000 town-garrison strength", "total_garrison_army_strength", 500_000, 2),
+        ("Fortress Network", "Reach 2,000,000 town-garrison strength", "total_garrison_army_strength", 2_000_000, 3),
+        ("Balanced Forces", "Control 3 heroes with at least 250,000 army strength each", "heroes_over_250k", 3, 3),
+        ("Seven Samurai", "Control 7 heroes with at least 10,000 army strength each", "armed_heroes", 7, 2),
+        ("Arcane General", "One hero has 1,000,000 army strength and all three adventure spells", "arcane_generals", 1, 3),
+        ("Renaissance Hero", "One hero reaches 10 in every primary skill", "renaissance_heroes", 1, 3),
+        ("Master of Attack", "One hero reaches 30 Attack", "highest_attack", 30, 3),
+        ("Unbreakable", "One hero reaches 30 Defense", "highest_defense", 30, 3),
+        ("Archmage", "One hero reaches 30 Spell Power", "highest_power", 30, 3),
+        ("Omniscient", "One hero reaches 30 Knowledge", "highest_knowledge", 30, 3),
+        ("Veteran Company", "Control 3 heroes of at least level 15", "heroes_level_15", 3, 3),
+        ("Hall of Legends", "Control 3 heroes of at least level 20", "heroes_level_20", 3, 4),
+        ("Experience Leader", "Reach 1,000,000 combined hero experience", "combined_hero_experience", 1_000_000, 3),
+        ("First Expansion", "Control a second town", "town_count", 2, 1),
+        ("Landlord", "Control 6 towns", "town_count", 6, 2),
+        ("Realm Without Borders", "Control 16 towns", "town_count", 16, 4),
+        ("Rapid Expansion", "Control 4 towns by day 14", "rapid_expansion", 1, 3),
+        ("Master Stockpiler", "Gather 100 of any non-gold resource", "largest_resource_stockpile", 100, 1),
+        ("Lumber Baron", "Accumulate 250 wood", "wood", 250, 2),
+        ("Ore Magnate", "Accumulate 250 ore", "ore", 250, 2),
+        ("Alchemist", "Accumulate 100 Mercury", "mercury", 100, 2),
+        ("Crystal Collector", "Accumulate 100 Crystals", "crystal", 100, 2),
+        ("Gem Hoarder", "Accumulate 100 Gems", "gems", 100, 2),
+        ("Sulfur Baron", "Accumulate 100 Sulfur", "sulfur", 100, 2),
+        ("Diverse Treasury", "Hold at least 50 of every non-gold resource", "diverse_treasury", 1, 3),
+        ("Golden Treasury", "Accumulate 100,000 gold", "gold", 100_000, 2),
+        ("War Chest", "Accumulate 500,000 gold", "gold", 500_000, 2),
+        ("Millionaire", "Accumulate 1,000,000 gold", "gold", 1_000_000, 3),
+        ("Dragon's Treasury", "Accumulate 2,000,000 gold", "gold", 2_000_000, 4),
+        ("Economic Superpower", "Hold 500,000 gold and 100 of every non-gold resource", "economic_superpower", 1, 5),
+        ("First Great Spell", "Gain any major adventure spell", "major_adventure_spells", 1, 1),
+        ("Town Portal", "Gain access to Town Portal", "has_tp", 1, 2),
+        ("Master of Flight", "Gain access to Fly", "has_fly", 1, 2),
+        ("Dimension Traveller", "Gain access to Dimension Door", "has_dd", 1, 2),
+        ("Master of the Adventure Map", "Gain all three adventure spells", "all_adventure_spells", 1, 3),
+        ("Portal Network", "Gain Town Portal while controlling at least 4 towns", "portal_network", 1, 3),
+        ("Arcane Supremacy", "Have Town Portal, Fly, and Dimension Door on 3 different heroes", "distinct_spell_masters", 1, 3),
+        ("Magical Dynasty", "Control 3 heroes that each know a major adventure spell", "major_spell_heroes", 3, 3),
+        ("First Clue", "Discover an Obelisk", "visited_obelisks", 1, 1),
+        ("Puzzle Seeker", "Discover 3 Obelisks", "visited_obelisks", 3, 2),
+        ("Puzzle Scholar", "Discover 5 Obelisks", "visited_obelisks", 5, 2),
+        ("Grail Hunter", "Discover 10 Obelisks", "visited_obelisks", 10, 3),
+        ("Heroic Entourage", "Control 8 heroes", "heroes_controlled", 8, 2),
+        ("Dragon Hunter", "Conquer 2 Utopias within 2 days", "utopias_in_two_days", 2, 3),
+        ("Dragonbane", "Conquer 4 Utopias within 7 days", "utopias_in_seven_days", 4, 4),
+        ("Utopia Rush", "Conquer a Utopia by day 28", "utopia_rush", 1, 3),
+        ("One Champion", "With at least 100,000 total army strength, one hero commands at least 80% of hero army strength", "one_champion", 1, 2),
+        ("Council of War", "Three heroes each command at least 20% of hero army strength", "council_of_war", 1, 3),
+        ("Nomad", "Reach 1,000,000 army strength while controlling at most one town", "nomad", 1, 3),
+        ("Poor but Dangerous", "Lead army strength while holding the least gold", "poor_but_dangerous", 1, 3),
+        ("Rich but Harmless", "Hold at least 10,000 gold, lead in gold, and have the weakest army", "rich_but_harmless", 1, 2),
+        ("Mayor, Not General", "Lead in towns while having the weakest army", "mayor_not_general", 1, 2),
+        ("Turtle King", "With at least 100,000 total army strength, lead in garrison strength without leading hero-army strength", "turtle_king", 1, 2),
+        ("Glass Cannon", "Reach at least 10 Attack, lead in hero Attack, and trail in hero Defense", "glass_cannon", 1, 2),
+        ("Speedrunner", "Unlock 3 other achievements on the same day", "achievements_same_day", 3, 3),
     ]
     total_obelisks = int(game_info.get("total_obelisks", 0) or 0)
     if total_obelisks:
         definitions.append(
-            ("Puzzle Master", "Discover every Obelisk", "visited_obelisks", total_obelisks, 30)
+            ("Puzzle Master", "Discover every Obelisk", "visited_obelisks", total_obelisks, 5)
         )
         definitions.append(
-            ("Grail Vision", "Discover at least half of all Obelisks", "visited_obelisks", math.ceil(total_obelisks / 2), 16)
+            ("Grail Vision", "Discover at least half of all Obelisks", "visited_obelisks", math.ceil(total_obelisks / 2), 3)
         )
         definitions.append(
-            ("Obelisk Dominance", "Discover more Obelisks than all opponents combined, with at least 5", "obelisk_dominance", 1, 22)
+            ("Obelisk Dominance", "Discover more Obelisks than all opponents combined, with at least 5", "obelisk_dominance", 1, 4)
         )
     total_utopias = int(game_info.get("total_utopias", 0) or 0)
     if total_utopias:
         definitions.append(
-            ("Hoard Monopoly", "Conquer at least half of all Dragon Utopias", "visited_utopias", math.ceil(total_utopias / 2), 24)
+            ("Hoard Monopoly", "Conquer at least half of all Dragon Utopias", "visited_utopias", math.ceil(total_utopias / 2), 4)
         )
     map_size = int(game_info.get("map_size", 0) or 0)
     map_levels = int(game_info.get("levels", 1) or 1)
     total_map_tiles = map_size * map_size * map_levels
     if total_map_tiles:
         definitions.extend([
-            ("Trailblazer", "Discover 10% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.10), 5),
-            ("Cartographer", "Discover 20% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.20), 10),
-            ("Seasoned Explorer", "Discover 30% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.30), 15),
-            ("Master Explorer", "Discover 50% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.50), 25),
+            ("Trailblazer", "Discover 10% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.10), 1),
+            ("Cartographer", "Discover 20% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.20), 2),
+            ("Seasoned Explorer", "Discover 30% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.30), 3),
+            ("Master Explorer", "Discover 50% of the map", "tiles_explored", math.ceil(total_map_tiles * 0.50), 4),
         ])
-    def difficulty_points(previous_value):
-        if previous_value <= 5:
-            return 1
-        if previous_value <= 10:
-            return 2
-        if previous_value <= 18:
-            return 3
-        if previous_value <= 29:
-            return 4
-        return 5
-
-    # Keep the relative difficulty already assigned to every achievement while
-    # expressing rewards on a compact, easier-to-balance 1–5 scale.
-    return [
-        (name, requirement, metric, threshold, difficulty_points(points))
-        for name, requirement, metric, threshold, points in definitions
-    ]
+    return definitions
 
 
 def build_achievement_awards(df_players, df_heroes, game_info=None):
@@ -848,7 +832,7 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day, game_info
     return rankings
 
 
-def calculate_hybrid_metric_scores(entries, zero_draw=True):
+def calculate_hybrid_metric_scores(entries):
     """Combine a podium bonus with progress relative to the metric leader."""
     if not entries:
         return {}
@@ -864,8 +848,8 @@ def calculate_hybrid_metric_scores(entries, zero_draw=True):
             if previous_value is not None and entry["value"] == previous_value
             else position
         )
-        if leader_value == 0:
-            points = 100.0 if zero_draw else 0.0
+        if entry["value"] <= 0 or leader_value <= 0:
+            points = 0.0
         else:
             placement = placement_bonuses[min(rank - 1, len(placement_bonuses) - 1)]
             progress = 60.0 * max(entry["value"], 0) / leader_value
@@ -880,7 +864,7 @@ def calculate_hybrid_metric_scores(entries, zero_draw=True):
 
 
 def build_player_power_scores(rankings):
-    """Return weighted 40/30/30 section scores plus achievement bonuses."""
+    """Return weighted 50/30/20 section scores plus achievement bonuses."""
     if not rankings:
         return []
 
@@ -906,9 +890,9 @@ def build_player_power_scores(rankings):
         for group in ["Military", "Map control", "Economic"]
     }
     section_weights = {
-        "Military": 40,
+        "Military": 50,
         "Map control": 30,
-        "Economic": 30,
+        "Economic": 20,
     }
     for ranking in rankings:
         if ranking["key"] == "achievements":
@@ -1643,9 +1627,9 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                     ),
                 ], style={"display": "flex", "alignItems": "center", "gap": "8px"}),
                 html.Div([
-                    html.Span(f"⚔️ Military {format_points(score['Military'])}/40"),
+                    html.Span(f"⚔️ Military {format_points(score['Military'])}/50"),
                     html.Span(f"🗺️ Map {format_points(score['Map control'])}/30"),
-                    html.Span(f"🪙 Economy {format_points(score['Economic'])}/30"),
+                    html.Span(f"🪙 Economy {format_points(score['Economic'])}/20"),
                     html.Span(f"🏆 Achievement bonus +{format_points(score['Achievements'])}"),
                 ], style={
                     "display": "flex",
@@ -1703,9 +1687,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                     },
                 )))
             badges = []
-            hybrid_scores = calculate_hybrid_metric_scores(
-                ranking["entries"], zero_draw=ranking["key"] != "achievements"
-            )
+            hybrid_scores = calculate_hybrid_metric_scores(ranking["entries"])
             for position, entry in enumerate(ranking["entries"], start=1):
                 player = entry["player"]
                 metric_result = hybrid_scores[player]
@@ -1887,7 +1869,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         return html.Div([
             html.H3("Overall Power Ranking", style={"marginBottom": "6px"}),
             html.P(
-                "Military, Map Control, and Economic metrics combine a 40-point placement bonus with up to 60 leader-relative progress points, then contribute up to 40, 30, and 30 points. Every 1–5 point achievement is added directly as an overall-score bonus.",
+                "Military, Map Control, and Economic metrics combine a 40-point placement bonus with up to 60 leader-relative progress points, then contribute up to 50, 30, and 20 points. Every 1–5 point achievement is added directly as an overall-score bonus.",
                 style={"color": "#687386", "marginTop": "0"},
             ),
             html.Div(power_cards, style={
@@ -1897,6 +1879,38 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
                 "marginBottom": "24px",
             }),
             html.H3("Category Rankings", style={"marginBottom": "10px"}),
+            html.Div([
+                html.Div([
+                    html.Strong("Placement bonus: "),
+                    "1st 40 · 2nd 30 · 3rd 23 · 4th 17 · 5th 12 · "
+                    "6th 8 · 7th 5 · 8th 3 points.",
+                ]),
+                html.Div([
+                    html.Strong("Progress bonus: "),
+                    "up to 60 additional points based on the player's value "
+                    "relative to the category leader.",
+                ]),
+                html.Div([
+                    html.Strong("General rules: "),
+                    "tied players with a positive value share the same place and bonus; tied leaders "
+                    "receive the full 100 metric points. A zero contribution earns no points. Scores are rounded to "
+                    "whole numbers. Military, Map Control, and Economic contribute "
+                    "up to 50, 30, and 20 overall points. Achievement points are "
+                    "added directly as bonuses.",
+                ]),
+            ], style={
+                "display": "grid",
+                "gap": "6px",
+                "padding": "13px 16px",
+                "marginBottom": "14px",
+                "border": "1px solid rgba(138, 100, 28, 0.30)",
+                "borderLeft": "5px solid #a87824",
+                "borderRadius": "10px",
+                "background": "rgba(255, 248, 219, 0.82)",
+                "color": "#4b3a25",
+                "fontSize": "13px",
+                "lineHeight": "1.45",
+            }),
             ranking_table,
             html.Div([
                 html.H3("Achievement Guide", style={"marginTop": "28px", "marginBottom": "6px"}),
