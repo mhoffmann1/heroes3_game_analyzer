@@ -238,6 +238,34 @@ class AchievementTests(unittest.TestCase):
         self.assertTrue(definitions)
         self.assertTrue(all(1 <= definition[4] <= 5 for definition in definitions))
 
+    def test_rapid_expansion_deadline_is_day_28(self):
+        definitions = {
+            definition[0]: definition for definition in get_achievement_definitions()
+        }
+        self.assertEqual(
+            "Control 4 towns by day 28",
+            definitions["Rapid Expansion"][1],
+        )
+
+        players = pd.DataFrame([
+            {"day": 28, "player_color": "Red", "town_count": 4},
+            {"day": 29, "player_color": "Blue", "town_count": 4},
+        ])
+        heroes = pd.DataFrame([
+            {"day": 28, "player_color": "Red", "hero_name": "Gelu"},
+            {"day": 29, "player_color": "Blue", "hero_name": "Solmyr"},
+        ])
+
+        awards = [
+            award
+            for award in build_achievement_awards(players, heroes)
+            if award["key"] == "Rapid Expansion"
+        ]
+
+        self.assertEqual(1, len(awards))
+        self.assertEqual("Red", awards[0]["player"])
+        self.assertEqual(28, awards[0]["day"])
+
     def test_arcane_supremacy_requires_three_distinct_heroes(self):
         players = pd.DataFrame([
             {"day": 1, "player_color": "Red"},

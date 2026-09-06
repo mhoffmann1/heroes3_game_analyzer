@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import re
+import uuid
 from collections import defaultdict
 
 import dash
@@ -359,7 +360,7 @@ def get_achievement_definitions(game_info=None):
         ("First Expansion", "Control a second town", "town_count", 2, 1),
         ("Landlord", "Control 6 towns", "town_count", 6, 2),
         ("Realm Without Borders", "Control 16 towns", "town_count", 16, 4),
-        ("Rapid Expansion", "Control 4 towns by day 14", "rapid_expansion", 1, 3),
+        ("Rapid Expansion", "Control 4 towns by day 28", "rapid_expansion", 1, 3),
         ("Master Stockpiler", "Gather 100 of any non-gold resource", "largest_resource_stockpile", 100, 1),
         ("Lumber Baron", "Accumulate 250 wood", "wood", 250, 2),
         ("Ore Magnate", "Accumulate 250 ore", "ore", 250, 2),
@@ -548,7 +549,7 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         (players["gold"] >= 500_000) & (players[resource_columns].min(axis=1) >= 100)
     ).astype(int)
     players["rapid_expansion"] = (
-        (players["town_count"] >= 4) & (players["day"] <= 14)
+        (players["town_count"] >= 4) & (players["day"] <= 28)
     ).astype(int)
     players["portal_network"] = ((players["has_tp"] > 0) & (players["town_count"] >= 4)).astype(int)
     players["utopia_rush"] = ((players["visited_utopias"] >= 1) & (players["day"] <= 28)).astype(int)
@@ -936,10 +937,26 @@ def format_points(value):
     return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
-def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, df_utopias, port):
+def run_dashboard(
+    df_heroes,
+    df_heroes_army_levels,
+    df_towns_army_levels,
+    df_players,
+    df_turn_time,
+    game_info,
+    df_utopias,
+    port,
+    live_reload=False,
+):
     configure_homm3_plotly_theme()
     app = dash.Dash(__name__)
     server = app.server
+    dashboard_version = uuid.uuid4().hex
+
+    if live_reload:
+        @server.get("/_h3_dashboard_version")
+        def dashboard_version_endpoint():
+            return {"version": dashboard_version}
 
     player_options = sorted(df_heroes["player_color"].dropna().unique())
     hero_options = sorted(df_heroes["hero_name"].dropna().unique())
@@ -1049,7 +1066,18 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
     # Add turn index so we know which turn each value belongs to
     df_turn_time["turn"] = range(1, len(df_turn_time) + 1)
 
-    app.layout = html.Div([
+    live_reload_components = []
+    if live_reload:
+        live_reload_components = [
+            dcc.Store(id="dashboard_version", data=dashboard_version),
+            dcc.Interval(
+                id="dashboard_version_poll",
+                interval=2000,
+                n_intervals=0,
+            ),
+        ]
+
+    app.layout = html.Div(live_reload_components + [
         html.Div([
             html.H1("Heroes III Chronicle"),
             html.P(
@@ -1332,6 +1360,32 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
             marks={int(day): str(day) for day in df_players["day"].unique()},
         ),
     ], className="homm-dashboard")
+
+    if live_reload:
+        app.clientside_callback(
+            """
+            async function(n_intervals, originalVersion) {
+                try {
+                    const response = await fetch(
+                        '/_h3_dashboard_version', {cache: 'no-store'}
+                    );
+                    if (response.ok) {
+                        const current = await response.json();
+                        if (current.version !== originalVersion) {
+                            window.location.reload();
+                        }
+                    }
+                } catch (error) {
+                    // The launcher briefly takes the server down while replacing
+                    // it. The following poll will retry after it is available.
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("dashboard_version", "data"),
+            Input("dashboard_version_poll", "n_intervals"),
+            State("dashboard_version", "data"),
+        )
 
 
     # Chart specs start here:
@@ -2407,7 +2461,7 @@ def run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_pla
         return fig
 
 
-    app.run(debug=True, port=port)
+    app.run(debug=not live_reload, use_reloader=False, port=port)
 
 def get_contrasting_color(hex_color):
     """Return black or white depending on contrast."""
@@ -2428,12 +2482,27 @@ def main():
         default=8050,
         help="Port to run the dashboard (default: 8050)"
     )
+    parser.add_argument(
+        "--live-reload",
+        action="store_true",
+        help="Reload open browser tabs when the launcher refreshes the data",
+    )
     args = parser.parse_args()
 
     data = load_combined_data(args.input_dir)
     df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turn_time, df_utopias = parse_data(data)
 
-    run_dashboard(df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, df_turn_time, game_info, df_utopias, args.port)
+    run_dashboard(
+        df_heroes,
+        df_heroes_army_levels,
+        df_towns_army_levels,
+        df_players,
+        df_turn_time,
+        game_info,
+        df_utopias,
+        args.port,
+        live_reload=args.live_reload,
+    )
 
 
 if __name__ == "__main__":
