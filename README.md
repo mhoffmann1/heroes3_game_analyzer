@@ -19,10 +19,16 @@ In the launcher:
 
 The launcher processes the existing saves, starts the dashboard, and opens it in
 the default browser. While monitoring is enabled, it detects new or overwritten
-turn saves, waits briefly for Heroes III to finish writing the file, regenerates
-the combined data, and restarts the dashboard. Open dashboard tabs reload
-automatically after the refreshed server is ready. Use **Stop** or close the GUI
-to stop both monitoring and the dashboard server.
+turn saves and waits briefly for Heroes III to finish writing the file. Newly
+appended turns are processed incrementally: unchanged historical saves are read
+from the cache and only the new save is parsed. If an older save is overwritten,
+removed, or inserted out of order, the analyzer automatically performs a safe
+full rebuild. The first run after upgrading from an older analyzer version also
+builds the incremental cache once.
+
+After processing, the launcher restarts the dashboard and open dashboard tabs
+reload automatically. Use **Stop** or close the GUI to stop both monitoring and
+the dashboard server.
 
 The GUI uses Python's standard `tkinter` module. On Linux distributions where it
 is packaged separately, install the package named `python3-tk`.

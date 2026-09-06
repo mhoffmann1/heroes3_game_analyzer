@@ -24,6 +24,8 @@ logger = logging.getLogger('h3_analyzer')
 PLAYER_COLORS = ['Red', 'Blue', 'Tan', 'Green', 'Orange', 'Purple', 'Teal', 'Pink']
 MAX_OBELISKS = 48
 OBELISK_TRAILING_SIGNATURE = bytes.fromhex("000300000000ff03ff3fff")
+INCREMENTAL_CACHE_VERSION = 1
+INCREMENTAL_CACHE_FILENAME = ".incremental_state.json"
 
 
 def extract_obelisk_data(raw):
@@ -711,6 +713,105 @@ def setup_logger(logfile):
 
     return logger
 
+
+def source_file_fingerprint(path):
+    """Return the inexpensive identity used to detect rewritten save files."""
+    stat = os.stat(path)
+    return {
+        "filename": os.path.basename(path),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+
+
+def build_source_manifest(input_path, files):
+    """Describe the ordered source saves and the optional game-start marker."""
+    start_files = sorted(Path(input_path).glob("GAME_BEGIN.GM*"))
+    start_fingerprint = (
+        source_file_fingerprint(start_files[0]) if start_files else None
+    )
+    return {
+        "version": INCREMENTAL_CACHE_VERSION,
+        "source_directory": str(Path(input_path).resolve()),
+        "start_file": start_fingerprint,
+        "saves": [
+            source_file_fingerprint(os.path.join(input_path, filename))
+            for filename in files
+        ],
+    }
+
+
+def reusable_save_count(cached_manifest, current_manifest, cached_filenames):
+    """Return the unchanged cached prefix length, or zero for a full rebuild."""
+    if not isinstance(cached_manifest, dict):
+        return 0
+    if cached_manifest.get("version") != INCREMENTAL_CACHE_VERSION:
+        return 0
+    if cached_manifest.get("source_directory") != current_manifest["source_directory"]:
+        return 0
+    if cached_manifest.get("start_file") != current_manifest["start_file"]:
+        return 0
+
+    cached_saves = cached_manifest.get("saves")
+    current_saves = current_manifest["saves"]
+    if not isinstance(cached_saves, list) or not cached_saves:
+        return 0
+    if len(cached_saves) > len(current_saves):
+        return 0
+    if cached_saves != current_saves[:len(cached_saves)]:
+        return 0
+    if cached_filenames != [entry["filename"] for entry in cached_saves]:
+        return 0
+    return len(cached_saves)
+
+
+def load_json_if_present(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+def restore_utopia_counts(utopia_tracker, cached_counts):
+    """Restore cumulative Utopia counts from incremental state."""
+    for player in utopia_tracker.player_names:
+        utopia_tracker.counts[player] = int(
+            cached_counts.get(player, 0) or 0
+        )
+
+
+def serialize_utopia_state(dragon_utopia_state):
+    """Serialize the cross-turn state needed for the next appended save."""
+    return [
+        {
+            "offset": utopia.offset,
+            "underground": utopia.underground,
+            "x_coord": utopia.x_coord,
+            "y_coord": utopia.y_coord,
+            "visited_bitmask": utopia.visited_bitmask,
+            "conquered": utopia.conquered,
+            "conqueredby": utopia.conqueredby,
+        }
+        for utopia in dragon_utopia_state
+    ]
+
+
+def restore_utopia_state(serialized_state):
+    """Recreate Utopia state without reparsing any historical save."""
+    restored = []
+    for item in serialized_state:
+        utopia = Utopia.__new__(Utopia)
+        utopia.offset = item["offset"]
+        utopia.underground = item["underground"]
+        utopia.x_coord = item["x_coord"]
+        utopia.y_coord = item["y_coord"]
+        utopia.visited_bitmask = item["visited_bitmask"]
+        utopia.conquered = item["conquered"]
+        utopia.conqueredby = item.get("conqueredby")
+        restored.append(utopia)
+    return restored
+
 def main():
 
     # Build default filename prefix with current date
@@ -791,22 +892,75 @@ def main():
 
             all_raw_data = []
             all_player_data = []
-            #dragon_utopia_state = []
+            combined_output = os.path.join(args.output, "combined_data.json")
+            combined_player_output = os.path.join(args.output, "combined_player_data.json")
+            cache_output = os.path.join(args.output, INCREMENTAL_CACHE_FILENAME)
+            current_manifest = build_source_manifest(input_path, files)
+            cached_manifest = load_json_if_present(cache_output)
+            cached_raw_data = load_json_if_present(combined_output)
+            cached_player_data = load_json_if_present(combined_player_output)
 
-            # Get creation time of GAME_BEGIN.GMX file
-            start_file = list(Path(input_path).glob("GAME_BEGIN.GM*"))
-            if start_file:
-                last_save_ctime = os.path.getctime(start_file[0])
+            reusable_count = 0
+            cache_has_runtime_state = (
+                isinstance(cached_manifest, dict)
+                and isinstance(cached_manifest.get("utopia_state"), list)
+                and isinstance(cached_manifest.get("utopia_counts"), dict)
+            )
+            if (
+                cache_has_runtime_state
+                and isinstance(cached_raw_data, list)
+                and isinstance(cached_player_data, list)
+            ):
+                cached_filenames = [
+                    entry.get("filename") for entry in cached_player_data
+                ]
+                if (
+                    len(cached_raw_data) == len(cached_player_data)
+                    and [entry.get("filename") for entry in cached_raw_data]
+                    == cached_filenames
+                ):
+                    reusable_count = reusable_save_count(
+                        cached_manifest, current_manifest, cached_filenames
+                    )
+
+            if reusable_count:
+                all_raw_data = cached_raw_data
+                all_player_data = cached_player_data
+                restore_utopia_counts(
+                    utopia_tracker, cached_manifest["utopia_counts"]
+                )
+                dragon_utopia_state.extend(
+                    restore_utopia_state(cached_manifest["utopia_state"])
+                )
+                last_save_ctime = os.path.getctime(
+                    os.path.join(input_path, files[reusable_count - 1])
+                )
+                previous_known_turn_time = all_player_data[-1].get("savetime", 60)
+                logger.info(
+                    "Reusing %s unchanged save(s); %s new save(s) need processing.",
+                    reusable_count,
+                    len(files) - reusable_count,
+                )
+
             else:
-                fallback = list(Path(input_path).glob("111.GM*"))
-                if fallback:
-                    last_save_ctime = os.path.getctime(fallback[0]) - 180
+                if cached_manifest:
+                    logger.info(
+                        "Save history changed or cache is incompatible; rebuilding all saves."
+                    )
+                start_file = list(Path(input_path).glob("GAME_BEGIN.GM*"))
+                if start_file:
+                    last_save_ctime = os.path.getctime(start_file[0])
                 else:
-                    raise FileNotFoundError("Neither GAME_BEGIN.GM* nor 111.GM* found in input_path")
-            #last_save_ctime = os.path.getctime(list(Path(input_path).glob("GAME_BEGIN.GM*"))[0])
-            previous_known_turn_time = 60
+                    fallback = list(Path(input_path).glob("111.GM*"))
+                    if fallback:
+                        last_save_ctime = os.path.getctime(fallback[0]) - 180
+                    else:
+                        raise FileNotFoundError("Neither GAME_BEGIN.GM* nor 111.GM* found in input_path")
+                previous_known_turn_time = 60
 
-            for filename in tqdm(files, desc="Processing saves"):
+            processing_failed = False
+            files_to_process = files[reusable_count:]
+            for filename in tqdm(files_to_process, desc="Processing saves"):
                 filepath = os.path.join(input_path, filename)
                 try:
                     raw_data, player_data = process_file(
@@ -837,14 +991,34 @@ def main():
 
                 except Exception as e:
                     logger.error(f"Failed to process {filename}: {e}")
+                    processing_failed = True
+                    break
 
-            combined_output = os.path.join(args.output, "combined_data.json")
+            if processing_failed:
+                if reusable_count:
+                    logger.error(
+                        "Incremental update failed; the previous combined data was preserved."
+                    )
+                    sys.exit(1)
+                logger.warning(
+                    "The partial full-rebuild output will not be cached for incremental reuse."
+                )
+
             save_to_json(all_raw_data, combined_output)
             logger.info(f"Combined raw data saved to {combined_output}")
 
-            combined_player_output = os.path.join(args.output, "combined_player_data.json")
             save_to_json(all_player_data, combined_player_output)
             logger.info(f"Combined player data saved to {combined_player_output}")
+
+            if not processing_failed:
+                current_manifest["utopia_state"] = serialize_utopia_state(
+                    dragon_utopia_state
+                )
+                current_manifest["utopia_counts"] = utopia_tracker.as_dict()
+                save_to_json(current_manifest, cache_output)
+                logger.info(
+                    "Incremental cache saved; future appended turns will skip old saves."
+                )
 
         else:
             logger.error("Input path is neither a file nor a directory.")
