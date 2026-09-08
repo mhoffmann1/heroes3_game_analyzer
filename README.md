@@ -2,6 +2,37 @@
 
 ## How to run
 
+### Desktop launcher and live dashboard
+
+Start the GUI from the repository root with the project's Python environment:
+
+```bash
+venv_heroes/bin/python launcher.py
+```
+
+In the launcher:
+
+1. Choose the directory where Heroes III writes the game's save files.
+2. Give the processed game a name and, if needed, change the dashboard port.
+3. Leave **Monitor for new or changed save files** enabled for live play.
+4. Click **Process and start dashboard**.
+
+The launcher processes the existing saves, starts the dashboard, and opens it in
+the default browser. While monitoring is enabled, it detects new or overwritten
+turn saves and waits briefly for Heroes III to finish writing the file. Newly
+appended turns are processed incrementally: unchanged historical saves are read
+from the cache and only the new save is parsed. If an older save is overwritten,
+removed, or inserted out of order, the analyzer automatically performs a safe
+full rebuild. The first run after upgrading from an older analyzer version also
+builds the incremental cache once.
+
+After processing, the launcher restarts the dashboard and open dashboard tabs
+reload automatically. Use **Stop** or close the GUI to stop both monitoring and
+the dashboard server.
+
+The GUI uses Python's standard `tkinter` module. On Linux distributions where it
+is packaged separately, install the package named `python3-tk`.
+
 To decompress single save for manual analysys:
 
 ```bash
