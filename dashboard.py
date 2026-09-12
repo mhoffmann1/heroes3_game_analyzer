@@ -19,6 +19,112 @@ from plotly.subplots import make_subplots
 
 logger = logging.getLogger(__package__)
 
+PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
+MINE_METRICS = [
+    "sawmills",
+    "ore_pits",
+    "alchemists_labs",
+    "sulfur_dunes",
+    "crystal_caverns",
+    "gem_ponds",
+    "gold_mines",
+]
+METRIC_LABELS = {
+    "sawmills": "Sawmills",
+    "ore_pits": "Ore pits",
+    "alchemists_labs": "Alchemist's labs",
+    "sulfur_dunes": "Sulfur dunes",
+    "crystal_caverns": "Crystal caverns",
+    "gem_ponds": "Gem ponds",
+    "gold_mines": "Gold mines",
+}
+
+
+def metric_label(metric):
+    return METRIC_LABELS.get(metric, metric.replace("_", " ").capitalize())
+
+
+def normalize_unit_tier(level):
+    """Convert tier labels such as 6, '6+', and '7+' to an integer tier."""
+    match = re.match(r"(\d+)", str(level or ""))
+    return int(match.group(1)) if match else None
+
+
+def build_player_army_composition(
+    hero_armies, town_armies, selected_players, selected_day
+):
+    """Sum hero and town creatures by owner and base tier for one day.
+
+    Upgraded labels belong to the same creature tier as their base labels, so
+    e.g. columns ``7`` and ``7+`` are deliberately combined into tier 7.
+    """
+    totals = defaultdict(lambda: defaultdict(int))
+    excluded_columns = {"Hero", "Town", "Owner", "Day"}
+
+    for armies in (hero_armies, town_armies):
+        if armies.empty or "Day" not in armies or "Owner" not in armies:
+            continue
+        daily = armies[armies["Day"] == selected_day]
+        for _, row in daily.iterrows():
+            owner = row["Owner"]
+            if owner not in selected_players:
+                continue
+            for column in daily.columns:
+                if column in excluded_columns:
+                    continue
+                tier = normalize_unit_tier(column)
+                if tier is None:
+                    continue
+                value = pd.to_numeric(row[column], errors="coerce")
+                if pd.notna(value):
+                    totals[owner][tier] += int(value)
+
+    rows = []
+    for owner in PLAYER_ORDER:
+        if owner in totals:
+            rows.append({
+                "Owner": owner,
+                **{str(tier): totals[owner].get(tier, 0) for tier in range(1, 8)},
+            })
+    return pd.DataFrame(rows, columns=["Owner", *map(str, range(1, 8))])
+
+
+def get_hero_army_achievement_metrics(hero_data):
+    """Calculate stack and tier metrics from one hero's army only."""
+    stacks = []
+    for unit in hero_data.get("army", []) or []:
+        tier = normalize_unit_tier(unit.get("level"))
+        try:
+            count = int(unit.get("count", 0) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if count > 0:
+            stacks.append({"name": unit.get("name", ""), "count": count, "tier": tier})
+
+    tier_six_or_higher = [stack for stack in stacks if (stack["tier"] or 0) >= 6]
+    tier_seven = [stack for stack in stacks if stack["tier"] == 7]
+    represented_tiers = {stack["tier"] for stack in stacks if stack["tier"] is not None}
+    tier_seven_total = sum(stack["count"] for stack in tier_seven)
+    tier_seven_types = len({stack["name"] for stack in tier_seven if stack["name"]})
+
+    return {
+        "has_tier_seven": int(bool(tier_seven)),
+        "largest_stack": max((stack["count"] for stack in stacks), default=0),
+        "largest_tier_six_stack": max(
+            (stack["count"] for stack in tier_six_or_higher), default=0
+        ),
+        "largest_tier_seven_stack": max(
+            (stack["count"] for stack in tier_seven), default=0
+        ),
+        "tier_six_army_total": sum(stack["count"] for stack in tier_six_or_higher),
+        "mythical_host": int(tier_seven_total >= 300 and tier_seven_types >= 3),
+        "full_battle_line": int(set(range(1, 8)).issubset(represented_tiers)),
+        "no_weaklings": int(
+            len(stacks) == 7
+            and all((stack["tier"] or 0) >= 6 for stack in stacks)
+        ),
+    }
+
 
 def configure_homm3_plotly_theme():
     """Install the shared parchment-and-gold chart theme."""
@@ -178,6 +284,7 @@ def parse_data(data):
             #total_tiles = pow(game_info['map_size'],2)*game_info['levels']
 
             # Player-level data
+            mine_counts = player_data.get("mines", {})
             player_rows.append({
                 "day": day,
                 "player_color": player_color.capitalize(),
@@ -192,6 +299,9 @@ def parse_data(data):
                 "town_summary": simplified_towns,
                 "visited_utopias": player_data.get("visited_utopias", 0),
                 "visited_obelisks": player_data.get("visited_obelisks", 0),
+                **{mine: mine_counts.get(mine, 0) for mine in MINE_METRICS},
+                "total_mines": mine_counts.get("total_mines", 0),
+                "mine_score": mine_counts.get("mine_score", 0),
                 "total_hero_army_strength": player_data.get("heroes_strength", 0),
                 "total_garrison_army_strength": player_data.get("garrison_strength", 0),
                 "total_army_strength": player_data.get("total_strength", 0),
@@ -238,6 +348,7 @@ def create_hero_entry(hero_name, hero_data, player_color, day):
         "has_fly": hero_data.get("has_fly", False),
         "has_tp": hero_data.get("has_tp", False),
         }
+    hero.update(get_hero_army_achievement_metrics(hero_data))
     return hero
 
 def sort_key(col):
@@ -357,6 +468,15 @@ def get_achievement_definitions(game_info=None):
         ("Veteran Company", "Control 3 heroes of at least level 15", "heroes_level_15", 3, 3),
         ("Hall of Legends", "Control 3 heroes of at least level 20", "heroes_level_20", 3, 4),
         ("Experience Leader", "Reach 1,000,000 combined hero experience", "combined_hero_experience", 1_000_000, 3),
+        ("Elite Vanguard", "Be the first to command a tier-7 creature in a hero army", "has_tier_seven", 1, 1),
+        ("The Horde", "Have 500 creatures in one hero army stack", "largest_stack", 500, 2),
+        ("Elite Legion", "Have 100 tier-6-or-higher creatures in one hero army stack", "largest_tier_six_stack", 100, 3),
+        ("Seventh Heaven", "Have 100 tier-7 creatures in one hero army stack", "largest_tier_seven_stack", 100, 3),
+        ("Mythical Host", "One hero commands 300 tier-7 creatures of at least 3 different types", "mythical_host", 1, 5),
+        ("A Thousand Strong", "Have 1,000 creatures in one hero army stack", "largest_stack", 1_000, 3),
+        ("Army of Giants", "One hero commands 250 tier-6-or-higher creatures", "tier_six_army_total", 250, 3),
+        ("Full Battle Line", "One hero commands creatures representing all seven tiers", "full_battle_line", 1, 3),
+        ("No Weaklings Allowed", "Fill all seven hero army slots with tier-6-or-higher creatures", "no_weaklings", 1, 5),
         ("First Expansion", "Control a second town", "town_count", 2, 1),
         ("Landlord", "Control 6 towns", "town_count", 6, 2),
         ("Realm Without Borders", "Control 16 towns", "town_count", 16, 4),
@@ -374,6 +494,11 @@ def get_achievement_definitions(game_info=None):
         ("Millionaire", "Accumulate 1,000,000 gold", "gold", 1_000_000, 3),
         ("Dragon's Treasury", "Accumulate 2,000,000 gold", "gold", 2_000_000, 4),
         ("Economic Superpower", "Hold 500,000 gold and 100 of every non-gold resource", "economic_superpower", 1, 5),
+        ("Prospector", "Control 5 mines of any kind", "total_mines", 5, 1),
+        ("Mining Magnate", "Control 10 mines of any kind", "total_mines", 10, 2),
+        ("Master of the Deep", "Control 20 mines of any kind", "total_mines", 20, 4),
+        ("Master of the Elements", "Control an Alchemist's Lab, Sulfur Dune, Crystal Cavern, and Gem Pond", "rare_mine_set", 1, 3),
+        ("Gold Rush", "Take control of a Gold Mine", "gold_mines", 1, 2),
         ("First Great Spell", "Gain any major adventure spell", "major_adventure_spells", 1, 1),
         ("Town Portal", "Gain access to Town Portal", "has_tp", 1, 2),
         ("Master of Flight", "Gain access to Fly", "has_fly", 1, 2),
@@ -447,13 +572,17 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         "total_army_strength", "total_hero_army_strength",
         "total_garrison_army_strength", "tiles_explored", "wood", "ore",
         "mercury", "sulfur", "crystal", "gems", "gold",
+        *MINE_METRICS, "total_mines", "mine_score",
     ]
     for column in numeric_player_columns:
         if column not in players:
             players[column] = 0
         players[column] = pd.to_numeric(players[column], errors="coerce").fillna(0)
     hero_numeric_columns = [
-        "level", "army_strength", "experience", "attack", "defense", "power", "knowledge"
+        "level", "army_strength", "experience", "attack", "defense", "power", "knowledge",
+        "has_tier_seven", "largest_stack", "largest_tier_six_stack",
+        "largest_tier_seven_stack", "tier_six_army_total", "mythical_host",
+        "full_battle_line", "no_weaklings",
     ]
     for column in hero_numeric_columns:
         if column not in heroes:
@@ -502,6 +631,14 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         major_spell_heroes=("major_spell_heroes", "sum"),
         arcane_generals=("arcane_generals", "sum"),
         council_members=("council_members", "sum"),
+        has_tier_seven=("has_tier_seven", "max"),
+        largest_stack=("largest_stack", "max"),
+        largest_tier_six_stack=("largest_tier_six_stack", "max"),
+        largest_tier_seven_stack=("largest_tier_seven_stack", "max"),
+        tier_six_army_total=("tier_six_army_total", "max"),
+        mythical_host=("mythical_host", "max"),
+        full_battle_line=("full_battle_line", "max"),
+        no_weaklings=("no_weaklings", "max"),
     ).reset_index() if not heroes.empty else pd.DataFrame()
     distinct_spell_rows = []
     for (day, player), group in heroes.groupby(["day", "player_color"]):
@@ -534,6 +671,9 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         "armed_heroes", "heroes_level_15", "heroes_level_20", "renaissance_heroes",
         "major_spell_heroes", "arcane_generals", "distinct_spell_masters",
         "council_members",
+        "has_tier_seven", "largest_stack", "largest_tier_six_stack",
+        "largest_tier_seven_stack", "tier_six_army_total", "mythical_host",
+        "full_battle_line", "no_weaklings",
     ]
     for column in hero_summary_columns:
         if column not in players:
@@ -547,6 +687,11 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
     players["diverse_treasury"] = (players[resource_columns].min(axis=1) >= 50).astype(int)
     players["economic_superpower"] = (
         (players["gold"] >= 500_000) & (players[resource_columns].min(axis=1) >= 100)
+    ).astype(int)
+    players["rare_mine_set"] = (
+        players[[
+            "alchemists_labs", "sulfur_dunes", "crystal_caverns", "gem_ponds"
+        ]].min(axis=1) >= 1
     ).astype(int)
     players["rapid_expansion"] = (
         (players["town_count"] >= 4) & (players["day"] <= 28)
@@ -752,6 +897,7 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day, game_info
         "tiles_explored", "heroes_controlled",
         "strongest_hero_strength",
         "adventure_spells",
+        "mine_score",
     ]
     for column in numeric_columns:
         if column not in current:
@@ -776,6 +922,7 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day, game_info
         ("wood_and_ore", "Wood & ore", "Economic"),
         ("rare_resources", "Gems, crystals, sulfur & mercury", "Economic"),
         ("gold", "Gold", "Economic"),
+        ("mine_score", "Mine control (basic ×1, rare & gold ×2)", "Economic"),
     ]
     player_order = {
         player: index for index, player in enumerate(
@@ -1047,7 +1194,7 @@ def run_dashboard(
     player_metric_options = ["gold", "town_count", "total_army_strength", "total_hero_army_strength", 
                              "total_garrison_army_strength", "total_army_hitpoints", "visited_utopias",
                              "visited_obelisks", "tiles_explored", "wood", "ore", "mercury", "sulfur",
-                             "crystal", "gems"]
+                             "crystal", "gems", *MINE_METRICS]
 
     PLAYER_COLORS = {
         "Red": "#FF0000",
@@ -1060,8 +1207,6 @@ def run_dashboard(
         "Pink": "#FF69B4",
         "None": "#808080",   # Grey for 'None' player
     }
-
-    PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
 
     # Add turn index so we know which turn each value belongs to
     df_turn_time["turn"] = range(1, len(df_turn_time) + 1)
@@ -1197,7 +1342,7 @@ def run_dashboard(
             html.Label("Select Player Metrics"),
             dcc.Dropdown(
                 id="player_metric_selector",
-                options=[{"label": m.capitalize(), "value": m} for m in player_metric_options],
+                options=[{"label": metric_label(m), "value": m} for m in player_metric_options],
                 value=["gold"],
                 multi=True
             ),
@@ -1316,7 +1461,7 @@ def run_dashboard(
         html.Label("Select Heatmap Metric"),
         dcc.Dropdown(
             id="heatmap_metric_selector",
-            options=[{"label": m.capitalize(), "value": m} for m in player_metric_options],
+            options=[{"label": metric_label(m), "value": m} for m in player_metric_options],
             value="town_count",
             clearable=False
         ),
@@ -1609,7 +1754,7 @@ def run_dashboard(
                     x=group["day"],
                     y=group[metric],
                     mode="lines+markers",
-                    name=f"{player} - {metric.capitalize()}",
+                    name=f"{player} - {metric_label(metric)}",
                     line=dict(color=color),
                     marker=dict(color=color)
                 ))
@@ -1645,6 +1790,7 @@ def run_dashboard(
             "wood_and_ore": "🪵",
             "rare_resources": "💎",
             "gold": "🪙",
+            "mine_score": "⛏️",
             "visited_utopias": "🐉",
             "visited_obelisks": "🗿",
             "total_army_strength": "⚔️",
@@ -2014,59 +2160,16 @@ def run_dashboard(
         if not selected_players:
             return go.Figure()
 
-        # Filter to selected day
-        heroes_filtered = df_heroes_army_levels[df_heroes_army_levels["Day"] == selected_day].copy()
-        towns_filtered  = df_towns_army_levels[df_towns_army_levels["Day"] == selected_day].copy()
-
-        # Army columns = union of heroes+towns minus non-army columns
-        exclude_cols = {"Hero", "Town", "Owner", "Day"}
-        army_cols = sorted((set(heroes_filtered.columns) | set(towns_filtered.columns)) - exclude_cols)
-
-        # Ensure both have same army columns
-        for col in army_cols:
-            if col not in heroes_filtered:
-                heroes_filtered[col] = 0
-            if col not in towns_filtered:
-                towns_filtered[col] = 0
-
-        for df in (heroes_filtered, towns_filtered):
-            for col in army_cols:
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
-
-        # Group by Owner
-        heroes_grouped = heroes_filtered.groupby("Owner", as_index=False)[army_cols].sum()
-        towns_grouped  = towns_filtered.groupby("Owner",  as_index=False)[army_cols].sum()
-
-        # Merge hero + town contributions
-        combined = pd.merge(
-            heroes_grouped, towns_grouped,
-            on="Owner", how="outer", suffixes=("_h", "_t")
-        ).fillna(0)
-
-        # Collapse hero + town into total
-        for col in army_cols:
-            h_col, t_col = f"{col}_h", f"{col}_t"
-            h_vals = pd.to_numeric(combined[h_col], errors="coerce").fillna(0).astype(int) if h_col in combined else 0
-            t_vals = pd.to_numeric(combined[t_col], errors="coerce").fillna(0).astype(int) if t_col in combined else 0
-            combined[col] = h_vals + t_vals
-            combined.drop(columns=[c for c in (h_col, t_col) if c in combined], inplace=True)
-
-        # Filter only selected players
-        combined = combined[combined["Owner"].isin(selected_players)]
+        combined = build_player_army_composition(
+            df_heroes_army_levels,
+            df_towns_army_levels,
+            selected_players,
+            selected_day,
+        )
         if combined.empty:
             return go.Figure()
 
-        # --- Enforce player order ---
-        PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
-        combined["Owner"] = pd.Categorical(combined["Owner"], categories=PLAYER_ORDER, ordered=True)
-        combined = combined.sort_values("Owner")
-
-        # Sort columns: 1, 1+, 2, 2+, ...
-        import re
-        def sort_key(c):
-            m = re.match(r"(\d+)", c)
-            return (int(m.group(1)), "+" in c) if m else (999, c)
-        army_cols_sorted = sorted(army_cols, key=sort_key)
+        army_cols_sorted = list(map(str, range(1, 8)))
 
         # --- Build grouped stacked bar chart ---
         fig = go.Figure()
@@ -2085,7 +2188,7 @@ def run_dashboard(
         fig.update_layout(
             barmode="group",  # bars side by side per level, colored by player
             title=f"Total Army Composition by Player (Day {selected_day})",
-            xaxis_title="Unit Level",
+            xaxis_title="Creature Tier (base + upgraded)",
             yaxis_title="Number of Units",
             legend_title="Player"
         )
@@ -2186,11 +2289,11 @@ def run_dashboard(
             y=pivot.index,
             colorscale="YlGnBu",
             hoverongaps=False,
-            colorbar=dict(title=selected_metric.capitalize())
+            colorbar=dict(title=metric_label(selected_metric))
         ))
 
         fig.update_layout(
-            title=f"{selected_metric.capitalize()} Timeline Heatmap",
+            title=f"{metric_label(selected_metric)} Timeline Heatmap",
             xaxis_title="Game Day",
             yaxis_title="Player",
             yaxis=dict(autorange="reversed")  # Top = Red

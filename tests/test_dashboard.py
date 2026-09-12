@@ -4,6 +4,7 @@ import pandas as pd
 
 from dashboard import (
     build_achievement_awards,
+    build_player_army_composition,
     build_player_power_scores,
     build_player_summary_rankings,
     calculate_hybrid_metric_scores,
@@ -11,6 +12,31 @@ from dashboard import (
     get_achievement_definitions,
     get_top_heroes_by_army_strength,
 )
+
+
+class PlayerArmyCompositionTests(unittest.TestCase):
+    def test_combines_base_and_upgraded_units_from_heroes_and_towns(self):
+        heroes = pd.DataFrame([
+            {"Hero": "Gelu", "Owner": "Red", "Day": 10, "1": 4, "7": 2, "7+": 3},
+            {"Hero": "Solmyr", "Owner": "Blue", "Day": 10, "1+": 8, "7+": 9},
+            {"Hero": "Old", "Owner": "Red", "Day": 9, "7+": 100},
+        ]).fillna(0)
+        towns = pd.DataFrame([
+            {"Town": "Castle", "Owner": "Red", "Day": 10, "1+": 6, "7+": 5},
+            {"Town": "Tower", "Owner": "Blue", "Day": 10, "7": 20},
+        ]).fillna(0)
+
+        result = build_player_army_composition(
+            heroes, towns, ["Red"], selected_day=10
+        )
+
+        self.assertEqual(["Red"], result["Owner"].tolist())
+        self.assertEqual(10, result.loc[0, "1"])
+        self.assertEqual(10, result.loc[0, "7"])
+        self.assertEqual(
+            20,
+            sum(result.loc[0, str(tier)] for tier in range(1, 8)),
+        )
 
 
 class HeroMetricDefaultsTests(unittest.TestCase):
@@ -75,6 +101,7 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
                 "sulfur": 3, "mercury": 4, "gold": 5000,
                 "visited_utopias": 1, "total_army_strength": 900,
                 "visited_obelisks": 2,
+                "mine_score": 7,
                 "tiles_explored": 120,
             },
             {
@@ -83,6 +110,7 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
                 "sulfur": 4, "mercury": 5, "gold": 4000,
                 "visited_utopias": 2, "total_army_strength": 800,
                 "visited_obelisks": 1,
+                "mine_score": 10,
                 "tiles_explored": 150,
             },
             {
@@ -124,6 +152,13 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
         self.assertEqual(
             [14, 10],
             [entry["value"] for entry in by_key["rare_resources"]["entries"]],
+        )
+        self.assertEqual(
+            [("Blue", 10), ("Red", 7)],
+            [
+                (entry["player"], entry["value"])
+                for entry in by_key["mine_score"]["entries"]
+            ],
         )
         self.assertEqual(
             [("Red", 2), ("Blue", 1)],
@@ -227,6 +262,43 @@ class PlayerSummaryRankingsTests(unittest.TestCase):
 
 
 class AchievementTests(unittest.TestCase):
+    def test_awards_mine_milestones_and_rare_mine_set(self):
+        players = pd.DataFrame([
+            {
+                "day": 1, "player_color": "Red", "total_mines": 5,
+                "sawmills": 1, "ore_pits": 1, "alchemists_labs": 1,
+                "sulfur_dunes": 1, "crystal_caverns": 1,
+            },
+            {
+                "day": 2, "player_color": "Red", "total_mines": 10,
+                "sawmills": 2, "ore_pits": 2, "alchemists_labs": 1,
+                "sulfur_dunes": 1, "crystal_caverns": 1, "gem_ponds": 1,
+                "gold_mines": 1,
+            },
+            {
+                "day": 2, "player_color": "Blue", "total_mines": 20,
+                "sawmills": 19, "gold_mines": 1,
+            },
+        ]).fillna(0)
+        heroes = pd.DataFrame(columns=["day", "player_color", "hero_name"])
+
+        awards = build_achievement_awards(players, heroes)
+        by_key = {}
+        for award in awards:
+            by_key.setdefault(award["key"], []).append(award)
+
+        self.assertEqual("Red", by_key["Prospector"][0]["player"])
+        self.assertEqual(
+            {"Red", "Blue"},
+            {award["player"] for award in by_key["Mining Magnate"]},
+        )
+        self.assertEqual("Blue", by_key["Master of the Deep"][0]["player"])
+        self.assertEqual("Red", by_key["Master of the Elements"][0]["player"])
+        self.assertEqual(
+            {"Red", "Blue"},
+            {award["player"] for award in by_key["Gold Rush"]},
+        )
+
     def test_definitions_contain_final_one_to_five_point_values(self):
         definitions = get_achievement_definitions({
             "total_obelisks": 10,

@@ -24,7 +24,18 @@ logger = logging.getLogger('h3_analyzer')
 PLAYER_COLORS = ['Red', 'Blue', 'Tan', 'Green', 'Orange', 'Purple', 'Teal', 'Pink']
 MAX_OBELISKS = 48
 OBELISK_TRAILING_SIGNATURE = bytes.fromhex("000300000000ff03ff3fff")
-INCREMENTAL_CACHE_VERSION = 1
+MINE_RECORD_SIZE = 62
+MINE_RECORD_BODY = (b"\xff" * 28) + (b"\x00" * 28)
+MINE_TYPES = [
+    "sawmills",
+    "alchemists_labs",
+    "ore_pits",
+    "sulfur_dunes",
+    "crystal_caverns",
+    "gem_ponds",
+    "gold_mines",
+]
+INCREMENTAL_CACHE_VERSION = 3
 INCREMENTAL_CACHE_FILENAME = ".incremental_state.json"
 
 
@@ -99,6 +110,116 @@ def extract_obelisk_data(raw):
         "total": total,
         "table_offset": table_offset,
         "visited_by_player": visited_by_player,
+        "objects": objects,
+    }
+
+
+def _empty_mine_counts():
+    return {mine_type: 0 for mine_type in MINE_TYPES}
+
+
+def extract_mine_data(raw, map_size, levels):
+    """Extract native HoTA mine ownership records from decompressed save data."""
+    raw = bytes(raw)
+    owned_by_player = {
+        color: {**_empty_mine_counts(), "total_mines": 0, "mine_score": 0}
+        for color in PLAYER_COLORS
+    }
+    empty_result = {
+        "total": 0,
+        "table_offset": None,
+        "owned_by_player": owned_by_player,
+        "neutral": {**_empty_mine_counts(), "total_mines": 0},
+        "objects": [],
+    }
+    try:
+        map_size = int(map_size)
+        levels = int(levels)
+    except (TypeError, ValueError):
+        return empty_result
+    if not raw or map_size <= 0 or levels <= 0:
+        return empty_result
+
+    # Native mine entries use a three-byte header, a distinctive fixed body,
+    # and three coordinate bytes. Group matching entries at their 62-byte
+    # stride, then select the unique longest run as the ownership table.
+    record_offsets = set()
+    search_at = 0
+    while True:
+        body_offset = raw.find(MINE_RECORD_BODY, search_at)
+        if body_offset < 0:
+            break
+        search_at = body_offset + 1
+        record_offset = body_offset - 3
+        record_end = record_offset + MINE_RECORD_SIZE
+        if record_offset < 0 or record_end > len(raw):
+            continue
+        owner, subtype, reserved = raw[record_offset:record_offset + 3]
+        x, y, z = raw[record_offset + 59:record_end]
+        if (
+            owner in (*range(len(PLAYER_COLORS)), 0xFF)
+            and subtype < len(MINE_TYPES)
+            and reserved == 0
+            and x < map_size
+            and y < map_size
+            and z < levels
+        ):
+            record_offsets.add(record_offset)
+
+    runs = []
+    for offset in sorted(record_offsets):
+        if offset - MINE_RECORD_SIZE in record_offsets:
+            continue
+        run = []
+        while offset in record_offsets:
+            run.append(offset)
+            offset += MINE_RECORD_SIZE
+        runs.append(run)
+
+    if not runs:
+        logger.warning("No native HoTA mine table was found.")
+        return empty_result
+    runs.sort(key=lambda run: len(run), reverse=True)
+    if len(runs[0]) < 2 or (len(runs) > 1 and len(runs[0]) == len(runs[1])):
+        logger.warning(
+            "Could not identify a unique native HoTA mine table; longest run sizes: %s.",
+            [len(run) for run in runs[:5]],
+        )
+        return empty_result
+
+    objects = []
+    neutral = empty_result["neutral"]
+    for index, offset in enumerate(runs[0]):
+        owner_index, subtype = raw[offset:offset + 2]
+        x, y, z = raw[offset + 59:offset + MINE_RECORD_SIZE]
+        mine_type = MINE_TYPES[subtype]
+        owner = PLAYER_COLORS[owner_index] if owner_index < len(PLAYER_COLORS) else None
+        counts = owned_by_player[owner] if owner else neutral
+        counts[mine_type] += 1
+        counts["total_mines"] += 1
+        objects.append({
+            "index": index,
+            "owner": owner,
+            "type": mine_type,
+            "coords": [x, y, z],
+        })
+
+    for counts in owned_by_player.values():
+        counts["mine_score"] = (
+            counts["sawmills"] + counts["ore_pits"]
+            + 2 * sum(counts[mine_type] for mine_type in MINE_TYPES
+                      if mine_type not in {"sawmills", "ore_pits"})
+        )
+
+    logger.debug(
+        "Mine table found at offset %s: total=%s, ownership=%s",
+        runs[0][0], len(objects), owned_by_player,
+    )
+    return {
+        "total": len(objects),
+        "table_offset": runs[0][0],
+        "owned_by_player": owned_by_player,
+        "neutral": neutral,
         "objects": objects,
     }
 
@@ -275,6 +396,20 @@ def calculate_army_levels(army, unit_stats):
                 army_levels[str(unit_stat["Level"])] += unit_count
     return army_levels
 
+def add_army_unit_levels(army, unit_stats):
+    """Return army stacks enriched with their normalized source tier labels."""
+    levels_by_name = {
+        unit.get("Name"): unit.get("Level")
+        for unit in unit_stats.get("units", [])
+    }
+    return [
+        {
+            **unit,
+            "level": levels_by_name.get(unit.get("name")),
+        }
+        for unit in army
+    ]
+
 def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
     """Extract stats for all heroes and towns in the savegame."""
     heroes = []
@@ -304,6 +439,7 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
                     for unit in getattr(hero, "army", [])
                     if unit and unit.get("name")
                 ]
+                army = add_army_unit_levels(army, unit_stats)
                 
                 # Get primary skills for army strength calculation
                 attack_skill = stats.get("attack", 0)
@@ -363,6 +499,11 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
     game_info = parse_game_info(mapdata, towns)
     obelisk_data = extract_obelisk_data(getattr(save, "raw", b""))
     game_info["total_obelisks"] = obelisk_data["total"]
+    mine_data = extract_mine_data(
+        getattr(save, "raw", b""),
+        mapdata.get("size", 0),
+        mapdata.get("levels", 1),
+    )
     
     # Utopia data:
     # If dragon_utopia_state is empty - then extract info from map tiles and put into dragon_utopia_state
@@ -537,6 +678,7 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
         "resources": resources,
         "utopias": utopias_summary,
         "obelisks": obelisk_data,
+        "mines": mine_data,
     }, tracker 
 
 def find_single_one(bitmask: str) -> int | None:
@@ -588,7 +730,8 @@ def aggregate_player_data(json_data, utopia_tracker):
             'towns': [],
             'visited_utopias': 0,
             'visited_obelisks': 0,
-            'resources': {}
+            'resources': {},
+            'mines': {**_empty_mine_counts(), 'total_mines': 0, 'mine_score': 0},
         }
     
     # Aggregate heroes by owner
@@ -633,6 +776,9 @@ def aggregate_player_data(json_data, utopia_tracker):
             players[player]['visited_obelisks'] = json_data.get(
                 'obelisks', {}
             ).get('visited_by_player', {}).get(player, 0)
+            players[player]['mines'].update(
+                json_data.get('mines', {}).get('owned_by_player', {}).get(player, {})
+            )
     
     utopias = {}
     for i, utopia in enumerate(json_data['utopias']):
@@ -642,7 +788,8 @@ def aggregate_player_data(json_data, utopia_tracker):
         'game_info': game_info,
         'players': players,
         'utopias': utopias,
-        'obelisks': json_data.get('obelisks', {})
+        'obelisks': json_data.get('obelisks', {}),
+        'mines': json_data.get('mines', {}),
                 
     }
 
