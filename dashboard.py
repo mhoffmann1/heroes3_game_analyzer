@@ -19,6 +19,114 @@ from plotly.subplots import make_subplots
 
 logger = logging.getLogger(__package__)
 
+PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
+MINE_METRICS = [
+    "sawmills",
+    "ore_pits",
+    "alchemists_labs",
+    "sulfur_dunes",
+    "crystal_caverns",
+    "gem_ponds",
+    "gold_mines",
+]
+METRIC_LABELS = {
+    "sawmills": "Sawmills",
+    "ore_pits": "Ore pits",
+    "alchemists_labs": "Alchemist's labs",
+    "sulfur_dunes": "Sulfur dunes",
+    "crystal_caverns": "Crystal caverns",
+    "gem_ponds": "Gem ponds",
+    "gold_mines": "Gold mines",
+}
+
+
+def metric_label(metric):
+    return METRIC_LABELS.get(metric, metric.replace("_", " ").capitalize())
+
+
+def normalize_unit_tier(level):
+    """Convert tier labels such as 6, '6+', and '7+' to an integer tier."""
+    match = re.match(r"(\d+)", str(level or ""))
+    return int(match.group(1)) if match else None
+
+
+def build_player_army_composition(
+    hero_armies, town_armies, selected_players, selected_day
+):
+    """Sum hero and town creatures by owner and base tier for one day.
+
+    Upgraded labels belong to the same creature tier as their base labels, so
+    e.g. columns ``7`` and ``7+`` are deliberately combined into tier 7.
+    """
+    totals = defaultdict(lambda: defaultdict(int))
+    excluded_columns = {"Hero", "Town", "Owner", "Day"}
+
+    for armies in (hero_armies, town_armies):
+        if armies.empty or "Day" not in armies or "Owner" not in armies:
+            continue
+        daily = armies[armies["Day"] == selected_day]
+        for _, row in daily.iterrows():
+            owner = row["Owner"]
+            if owner not in selected_players:
+                continue
+            for column in daily.columns:
+                if column in excluded_columns:
+                    continue
+                tier = normalize_unit_tier(column)
+                if tier is None:
+                    continue
+                value = pd.to_numeric(row[column], errors="coerce")
+                if pd.notna(value):
+                    totals[owner][tier] += int(value)
+
+    rows = []
+    for owner in PLAYER_ORDER:
+        if owner in totals:
+            rows.append({
+                "Owner": owner,
+                **{str(tier): totals[owner].get(tier, 0) for tier in range(1, 8)},
+            })
+    return pd.DataFrame(rows, columns=["Owner", *map(str, range(1, 8))])
+
+
+def get_hero_army_achievement_metrics(hero_data):
+    """Calculate stack and tier metrics from one hero's army only."""
+    stacks = []
+    for unit in hero_data.get("army", []) or []:
+        tier = normalize_unit_tier(unit.get("level"))
+        try:
+            count = int(unit.get("count", 0) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if count > 0:
+            stacks.append({"name": unit.get("name", ""), "count": count, "tier": tier})
+
+    tier_six_or_higher = [stack for stack in stacks if (stack["tier"] or 0) >= 6]
+    tier_seven = [stack for stack in stacks if stack["tier"] == 7]
+    represented_tiers = {stack["tier"] for stack in stacks if stack["tier"] is not None}
+    tier_seven_total = sum(stack["count"] for stack in tier_seven)
+    tier_seven_types = len({stack["name"] for stack in tier_seven if stack["name"]})
+    distinct_unit_names = {stack["name"] for stack in stacks if stack["name"]}
+
+    return {
+        "has_tier_seven": int(bool(tier_seven)),
+        "largest_stack": max((stack["count"] for stack in stacks), default=0),
+        "largest_tier_six_stack": max(
+            (stack["count"] for stack in tier_six_or_higher), default=0
+        ),
+        "largest_tier_seven_stack": max(
+            (stack["count"] for stack in tier_seven), default=0
+        ),
+        "tier_six_army_total": sum(stack["count"] for stack in tier_six_or_higher),
+        "mythical_host": int(tier_seven_total >= 300 and tier_seven_types >= 3),
+        "full_battle_line": int(set(range(1, 8)).issubset(represented_tiers)),
+        "no_weaklings": int(
+            len(stacks) == 7
+            and len(distinct_unit_names) == 7
+            and all((stack["tier"] or 0) >= 6 for stack in stacks)
+        ),
+    }
+
 
 def configure_homm3_plotly_theme():
     """Install the shared parchment-and-gold chart theme."""
@@ -178,6 +286,7 @@ def parse_data(data):
             #total_tiles = pow(game_info['map_size'],2)*game_info['levels']
 
             # Player-level data
+            mine_counts = player_data.get("mines", {})
             player_rows.append({
                 "day": day,
                 "player_color": player_color.capitalize(),
@@ -192,6 +301,9 @@ def parse_data(data):
                 "town_summary": simplified_towns,
                 "visited_utopias": player_data.get("visited_utopias", 0),
                 "visited_obelisks": player_data.get("visited_obelisks", 0),
+                **{mine: mine_counts.get(mine, 0) for mine in MINE_METRICS},
+                "total_mines": mine_counts.get("total_mines", 0),
+                "mine_score": mine_counts.get("mine_score", 0),
                 "total_hero_army_strength": player_data.get("heroes_strength", 0),
                 "total_garrison_army_strength": player_data.get("garrison_strength", 0),
                 "total_army_strength": player_data.get("total_strength", 0),
@@ -238,6 +350,7 @@ def create_hero_entry(hero_name, hero_data, player_color, day):
         "has_fly": hero_data.get("has_fly", False),
         "has_tp": hero_data.get("has_tp", False),
         }
+    hero.update(get_hero_army_achievement_metrics(hero_data))
     return hero
 
 def sort_key(col):
@@ -325,9 +438,7 @@ def get_achievement_definitions(game_info=None):
     game_info = game_info or {}
     definitions = [
         ("First Utopia", "Conquer a Dragon Utopia", "visited_utopias", 1, 2),
-        ("Utopia Raider", "Conquer 3 Dragon Utopias", "visited_utopias", 3, 3),
-        ("Dragon Hoard Hunter", "Conquer 5 Dragon Utopias", "visited_utopias", 5, 3),
-        ("Utopia Overlord", "Conquer 10 Dragon Utopias", "visited_utopias", 10, 5),
+        ("Utopia Raider", "Conquer 4 Dragon Utopias", "visited_utopias", 4, 3),
         ("Four-Town Realm", "Control 4 towns", "town_count", 4, 1),
         ("Eight-Town Kingdom", "Control 8 towns", "town_count", 8, 2),
         ("Twelve-Town Empire", "Control 12 towns", "town_count", 12, 3),
@@ -347,7 +458,6 @@ def get_achievement_definitions(game_info=None):
         ("Iron Garrison", "Reach 500,000 town-garrison strength", "total_garrison_army_strength", 500_000, 2),
         ("Fortress Network", "Reach 2,000,000 town-garrison strength", "total_garrison_army_strength", 2_000_000, 3),
         ("Balanced Forces", "Control 3 heroes with at least 250,000 army strength each", "heroes_over_250k", 3, 3),
-        ("Seven Samurai", "Control 7 heroes with at least 10,000 army strength each", "armed_heroes", 7, 2),
         ("Arcane General", "One hero has 1,000,000 army strength and all three adventure spells", "arcane_generals", 1, 3),
         ("Renaissance Hero", "One hero reaches 10 in every primary skill", "renaissance_heroes", 1, 3),
         ("Master of Attack", "One hero reaches 30 Attack", "highest_attack", 30, 3),
@@ -357,6 +467,15 @@ def get_achievement_definitions(game_info=None):
         ("Veteran Company", "Control 3 heroes of at least level 15", "heroes_level_15", 3, 3),
         ("Hall of Legends", "Control 3 heroes of at least level 20", "heroes_level_20", 3, 4),
         ("Experience Leader", "Reach 1,000,000 combined hero experience", "combined_hero_experience", 1_000_000, 3),
+        ("Elite Vanguard", "Be the first to command a tier-7 creature in a hero army", "has_tier_seven", 1, 1),
+        ("The Horde", "Have 500 creatures in one hero army stack", "largest_stack", 500, 2),
+        ("Elite Legion", "Have 100 tier-6-or-higher creatures in one hero army stack", "largest_tier_six_stack", 100, 3),
+        ("Seventh Heaven", "Have 100 tier-7 creatures in one hero army stack", "largest_tier_seven_stack", 100, 3),
+        ("Mythical Host", "One hero commands 300 tier-7 creatures of at least 3 different types", "mythical_host", 1, 5),
+        ("A Thousand Strong", "Have 1,000 creatures in one hero army stack", "largest_stack", 1_000, 3),
+        ("Army of Giants", "One hero commands 250 tier-6-or-higher creatures", "tier_six_army_total", 250, 3),
+        ("Full Battle Line", "One hero commands creatures representing all seven tiers", "full_battle_line", 1, 3),
+        ("No Weaklings Allowed", "Fill all seven hero army slots with distinct tier-6-or-higher creatures", "no_weaklings", 1, 5),
         ("First Expansion", "Control a second town", "town_count", 2, 1),
         ("Landlord", "Control 6 towns", "town_count", 6, 2),
         ("Realm Without Borders", "Control 16 towns", "town_count", 16, 4),
@@ -374,43 +493,36 @@ def get_achievement_definitions(game_info=None):
         ("Millionaire", "Accumulate 1,000,000 gold", "gold", 1_000_000, 3),
         ("Dragon's Treasury", "Accumulate 2,000,000 gold", "gold", 2_000_000, 4),
         ("Economic Superpower", "Hold 500,000 gold and 100 of every non-gold resource", "economic_superpower", 1, 5),
-        ("First Great Spell", "Gain any major adventure spell", "major_adventure_spells", 1, 1),
+        ("Prospector", "Control 5 mines of any kind", "total_mines", 5, 1),
+        ("Mining Magnate", "Control 10 mines of any kind", "total_mines", 10, 2),
+        ("Master of the Deep", "Control 20 mines of any kind", "total_mines", 20, 4),
+        ("Master of the Elements", "Control an Alchemist's Lab, Sulfur Dune, Crystal Cavern, and Gem Pond", "rare_mine_set", 1, 3),
+        ("Gold Rush", "Take control of a Gold Mine", "gold_mines", 1, 2),
+        ("First Great Spell", "Gain any major adventure spell", "major_adventure_spells", 1, 0),
         ("Town Portal", "Gain access to Town Portal", "has_tp", 1, 2),
-        ("Master of Flight", "Gain access to Fly", "has_fly", 1, 2),
+        ("Master of Flight", "Gain access to Fly", "has_fly", 1, 1),
         ("Dimension Traveller", "Gain access to Dimension Door", "has_dd", 1, 2),
         ("Master of the Adventure Map", "Gain all three adventure spells", "all_adventure_spells", 1, 3),
-        ("Portal Network", "Gain Town Portal while controlling at least 4 towns", "portal_network", 1, 3),
         ("Arcane Supremacy", "Have Town Portal, Fly, and Dimension Door on 3 different heroes", "distinct_spell_masters", 1, 3),
         ("Magical Dynasty", "Control 3 heroes that each know a major adventure spell", "major_spell_heroes", 3, 3),
-        ("First Clue", "Discover an Obelisk", "visited_obelisks", 1, 1),
-        ("Puzzle Seeker", "Discover 3 Obelisks", "visited_obelisks", 3, 2),
-        ("Puzzle Scholar", "Discover 5 Obelisks", "visited_obelisks", 5, 2),
-        ("Grail Hunter", "Discover 10 Obelisks", "visited_obelisks", 10, 3),
         ("Heroic Entourage", "Control 8 heroes", "heroes_controlled", 8, 2),
-        ("Dragon Hunter", "Conquer 2 Utopias within 2 days", "utopias_in_two_days", 2, 3),
-        ("Dragonbane", "Conquer 4 Utopias within 7 days", "utopias_in_seven_days", 4, 4),
-        ("Utopia Rush", "Conquer a Utopia by day 28", "utopia_rush", 1, 3),
-        ("One Champion", "With at least 100,000 total army strength, one hero commands at least 80% of hero army strength", "one_champion", 1, 2),
-        ("Council of War", "Three heroes each command at least 20% of hero army strength", "council_of_war", 1, 3),
-        ("Nomad", "Reach 1,000,000 army strength while controlling at most one town", "nomad", 1, 3),
+        ("Nomad", "Reach 1,000,000 army strength while controlling at most one town", "nomad", 1, 1),
         ("Poor but Dangerous", "Lead army strength while holding the least gold", "poor_but_dangerous", 1, 3),
         ("Rich but Harmless", "Hold at least 10,000 gold, lead in gold, and have the weakest army", "rich_but_harmless", 1, 2),
         ("Mayor, Not General", "Lead in towns while having the weakest army", "mayor_not_general", 1, 2),
-        ("Turtle King", "With at least 100,000 total army strength, lead in garrison strength without leading hero-army strength", "turtle_king", 1, 2),
+        ("Turtle King", "With at least 100,000 total army strength, lead in garrison strength without leading hero-army strength", "turtle_king", 1, 1),
         ("Glass Cannon", "Reach at least 10 Attack, lead in hero Attack, and trail in hero Defense", "glass_cannon", 1, 2),
         ("Speedrunner", "Unlock 3 other achievements on the same day", "achievements_same_day", 3, 3),
     ]
     total_obelisks = int(game_info.get("total_obelisks", 0) or 0)
     if total_obelisks:
-        definitions.append(
-            ("Puzzle Master", "Discover every Obelisk", "visited_obelisks", total_obelisks, 5)
-        )
-        definitions.append(
-            ("Grail Vision", "Discover at least half of all Obelisks", "visited_obelisks", math.ceil(total_obelisks / 2), 3)
-        )
-        definitions.append(
-            ("Obelisk Dominance", "Discover more Obelisks than all opponents combined, with at least 5", "obelisk_dominance", 1, 4)
-        )
+        definitions.extend([
+            ("Grail Glimpse", "Discover 10% of all Obelisks", "visited_obelisks", math.ceil(total_obelisks * 0.10), 1),
+            ("Puzzle Seeker", "Discover 25% of all Obelisks", "visited_obelisks", math.ceil(total_obelisks * 0.25), 2),
+            ("Grail Vision", "Discover 50% of all Obelisks", "visited_obelisks", math.ceil(total_obelisks * 0.50), 3),
+            ("Grail Hunter", "Discover 75% of all Obelisks", "visited_obelisks", math.ceil(total_obelisks * 0.75), 4),
+            ("Puzzle Master", "Discover every Obelisk", "visited_obelisks", total_obelisks, 5),
+        ])
     total_utopias = int(game_info.get("total_utopias", 0) or 0)
     if total_utopias:
         definitions.append(
@@ -447,13 +559,17 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         "total_army_strength", "total_hero_army_strength",
         "total_garrison_army_strength", "tiles_explored", "wood", "ore",
         "mercury", "sulfur", "crystal", "gems", "gold",
+        *MINE_METRICS, "total_mines", "mine_score",
     ]
     for column in numeric_player_columns:
         if column not in players:
             players[column] = 0
         players[column] = pd.to_numeric(players[column], errors="coerce").fillna(0)
     hero_numeric_columns = [
-        "level", "army_strength", "experience", "attack", "defense", "power", "knowledge"
+        "level", "army_strength", "experience", "attack", "defense", "power", "knowledge",
+        "has_tier_seven", "largest_stack", "largest_tier_six_stack",
+        "largest_tier_seven_stack", "tier_six_army_total", "mythical_host",
+        "full_battle_line", "no_weaklings",
     ]
     for column in hero_numeric_columns:
         if column not in heroes:
@@ -467,7 +583,6 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
             or (isinstance(value, str) and value.lower() == "true")
         )
     heroes["heroes_over_250k"] = (heroes["army_strength"] >= 250_000).astype(int)
-    heroes["armed_heroes"] = (heroes["army_strength"] >= 10_000).astype(int)
     heroes["heroes_level_15"] = (heroes["level"] >= 15).astype(int)
     heroes["heroes_level_20"] = (heroes["level"] >= 20).astype(int)
     heroes["renaissance_heroes"] = (
@@ -478,9 +593,6 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
     heroes["arcane_generals"] = (
         (heroes["army_strength"] >= 1_000_000) & (heroes["major_spell_count"] == 3)
     ).astype(int)
-    hero_totals = heroes.groupby(["day", "player_color"])["army_strength"].transform("sum")
-    heroes["army_share"] = np.where(hero_totals > 0, heroes["army_strength"] / hero_totals, 0)
-    heroes["council_members"] = (heroes["army_share"] >= 0.20).astype(int)
 
     hero_daily = heroes.groupby(["day", "player_color"]).agg(
         highest_hero_level=("level", "max"),
@@ -495,13 +607,19 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         highest_power=("power", "max"),
         highest_knowledge=("knowledge", "max"),
         heroes_over_250k=("heroes_over_250k", "sum"),
-        armed_heroes=("armed_heroes", "sum"),
         heroes_level_15=("heroes_level_15", "sum"),
         heroes_level_20=("heroes_level_20", "sum"),
         renaissance_heroes=("renaissance_heroes", "sum"),
         major_spell_heroes=("major_spell_heroes", "sum"),
         arcane_generals=("arcane_generals", "sum"),
-        council_members=("council_members", "sum"),
+        has_tier_seven=("has_tier_seven", "max"),
+        largest_stack=("largest_stack", "max"),
+        largest_tier_six_stack=("largest_tier_six_stack", "max"),
+        largest_tier_seven_stack=("largest_tier_seven_stack", "max"),
+        tier_six_army_total=("tier_six_army_total", "max"),
+        mythical_host=("mythical_host", "max"),
+        full_battle_line=("full_battle_line", "max"),
+        no_weaklings=("no_weaklings", "max"),
     ).reset_index() if not heroes.empty else pd.DataFrame()
     distinct_spell_rows = []
     for (day, player), group in heroes.groupby(["day", "player_color"]):
@@ -531,9 +649,11 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         "highest_hero_level", "heroes_controlled", "has_tp", "has_fly", "has_dd",
         "strongest_hero_army", "combined_hero_experience", "highest_attack",
         "highest_defense", "highest_power", "highest_knowledge", "heroes_over_250k",
-        "armed_heroes", "heroes_level_15", "heroes_level_20", "renaissance_heroes",
+        "heroes_level_15", "heroes_level_20", "renaissance_heroes",
         "major_spell_heroes", "arcane_generals", "distinct_spell_masters",
-        "council_members",
+        "has_tier_seven", "largest_stack", "largest_tier_six_stack",
+        "largest_tier_seven_stack", "tier_six_army_total", "mythical_host",
+        "full_battle_line", "no_weaklings",
     ]
     for column in hero_summary_columns:
         if column not in players:
@@ -548,48 +668,19 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
     players["economic_superpower"] = (
         (players["gold"] >= 500_000) & (players[resource_columns].min(axis=1) >= 100)
     ).astype(int)
+    players["rare_mine_set"] = (
+        players[[
+            "alchemists_labs", "sulfur_dunes", "crystal_caverns", "gem_ponds"
+        ]].min(axis=1) >= 1
+    ).astype(int)
     players["rapid_expansion"] = (
         (players["town_count"] >= 4) & (players["day"] <= 28)
     ).astype(int)
-    players["portal_network"] = ((players["has_tp"] > 0) & (players["town_count"] >= 4)).astype(int)
-    players["utopia_rush"] = ((players["visited_utopias"] >= 1) & (players["day"] <= 28)).astype(int)
-    players["one_champion"] = (
-        (players["total_army_strength"] >= 100_000)
-        & (players["total_hero_army_strength"] > 0)
-        & (players["strongest_hero_army"] >= players["total_hero_army_strength"] * 0.80)
-    ).astype(int)
-    players["council_of_war"] = (players["council_members"] >= 3).astype(int)
     players["nomad"] = (
         (players["total_army_strength"] >= 1_000_000) & (players["town_count"] <= 1)
     ).astype(int)
 
     players = players.sort_values(["player_color", "day"], kind="stable")
-    players["utopias_in_two_days"] = 0
-    players["utopias_in_seven_days"] = 0
-    for _player, indices in players.groupby("player_color").groups.items():
-        player_history = players.loc[indices].sort_values("day")
-        for index, row in player_history.iterrows():
-            before_two_day_window = player_history[
-                player_history["day"] < row["day"] - 1
-            ]
-            two_day_baseline = (
-                before_two_day_window["visited_utopias"].iloc[-1]
-                if not before_two_day_window.empty else 0
-            )
-            players.at[index, "utopias_in_two_days"] = (
-                row["visited_utopias"] - two_day_baseline
-            )
-            before_seven_day_window = player_history[
-                player_history["day"] < row["day"] - 6
-            ]
-            seven_day_baseline = (
-                before_seven_day_window["visited_utopias"].iloc[-1]
-                if not before_seven_day_window.empty else 0
-            )
-            players.at[index, "utopias_in_seven_days"] = (
-                row["visited_utopias"] - seven_day_baseline
-            )
-
     day_groups = players.groupby("day")
     max_army = day_groups["total_army_strength"].transform("max")
     min_army = day_groups["total_army_strength"].transform("min")
@@ -609,10 +700,6 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
     players["mayor_not_general"] = ((max_towns > min_towns) & (max_army > min_army) & (players["town_count"] == max_towns) & (players["total_army_strength"] == min_army)).astype(int)
     players["turtle_king"] = ((players["total_army_strength"] >= 100_000) & (max_garrison > min_garrison) & (players["total_garrison_army_strength"] == max_garrison) & (players["total_hero_army_strength"] < max_hero_army)).astype(int)
     players["glass_cannon"] = ((players["highest_attack"] >= 10) & (max_attack > min_attack) & (max_defense > min_defense) & (players["highest_attack"] == max_attack) & (players["highest_defense"] == min_defense)).astype(int)
-    opponent_obelisks = day_groups["visited_obelisks"].transform("sum") - players["visited_obelisks"]
-    players["obelisk_dominance"] = (
-        (players["visited_obelisks"] >= 5) & (players["visited_obelisks"] > opponent_obelisks)
-    ).astype(int)
 
     definitions = get_achievement_definitions(game_info)
 
@@ -637,6 +724,10 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
             })
     same_day_counts = {}
     for award in awards:
+        # Fun-only, zero-point achievements must not indirectly generate
+        # points by helping to unlock Speedrunner.
+        if award["points"] <= 0:
+            continue
         count_key = (award["player"], award["day"])
         same_day_counts[count_key] = same_day_counts.get(count_key, 0) + 1
     speedrunner_candidates = [
@@ -752,6 +843,7 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day, game_info
         "tiles_explored", "heroes_controlled",
         "strongest_hero_strength",
         "adventure_spells",
+        "mine_score",
     ]
     for column in numeric_columns:
         if column not in current:
@@ -776,6 +868,7 @@ def build_player_summary_rankings(df_players, df_heroes, selected_day, game_info
         ("wood_and_ore", "Wood & ore", "Economic"),
         ("rare_resources", "Gems, crystals, sulfur & mercury", "Economic"),
         ("gold", "Gold", "Economic"),
+        ("mine_score", "Mine control (basic ×1, rare & gold ×2)", "Economic"),
     ]
     player_order = {
         player: index for index, player in enumerate(
@@ -1047,7 +1140,7 @@ def run_dashboard(
     player_metric_options = ["gold", "town_count", "total_army_strength", "total_hero_army_strength", 
                              "total_garrison_army_strength", "total_army_hitpoints", "visited_utopias",
                              "visited_obelisks", "tiles_explored", "wood", "ore", "mercury", "sulfur",
-                             "crystal", "gems"]
+                             "crystal", "gems", *MINE_METRICS]
 
     PLAYER_COLORS = {
         "Red": "#FF0000",
@@ -1060,8 +1153,6 @@ def run_dashboard(
         "Pink": "#FF69B4",
         "None": "#808080",   # Grey for 'None' player
     }
-
-    PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
 
     # Add turn index so we know which turn each value belongs to
     df_turn_time["turn"] = range(1, len(df_turn_time) + 1)
@@ -1197,7 +1288,7 @@ def run_dashboard(
             html.Label("Select Player Metrics"),
             dcc.Dropdown(
                 id="player_metric_selector",
-                options=[{"label": m.capitalize(), "value": m} for m in player_metric_options],
+                options=[{"label": metric_label(m), "value": m} for m in player_metric_options],
                 value=["gold"],
                 multi=True
             ),
@@ -1271,28 +1362,35 @@ def run_dashboard(
 
         dcc.Graph(id="town_pie_chart"),
 
-        html.H2("Utopia Visitation"),
-
-        html.Label("View Mode"),
-        dcc.RadioItems(
-            id="utopia_view_mode",
-            options=[
-                {"label": "Count", "value": "count"},
-                {"label": "Percentage", "value": "percentage"}
-            ],
-            value="count",
-            labelStyle={"display": "inline-block", "margin-right": "15px"},
-            inputStyle={"margin-right": "5px"}
-        ),
-
         html.Div([
+            html.H2("Utopia Visitation"),
+            dcc.Checklist(
+                id="toggle_utopia_visitation",
+                options=[{"label": "Show Utopia Visitation", "value": "show"}],
+                value=[],
+                style={"marginBottom": "10px", "fontWeight": "600"},
+            ),
             html.Div([
-                dcc.Graph(id="utopia_pie_chart")
-            ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
-
-            html.Div([
-                dcc.Graph(id="utopia_total_chart")
-            ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
+                html.Label("View Mode"),
+                dcc.RadioItems(
+                    id="utopia_view_mode",
+                    options=[
+                        {"label": "Count", "value": "count"},
+                        {"label": "Percentage", "value": "percentage"}
+                    ],
+                    value="count",
+                    labelStyle={"display": "inline-block", "margin-right": "15px"},
+                    inputStyle={"margin-right": "5px"}
+                ),
+                html.Div([
+                    html.Div([
+                        dcc.Graph(id="utopia_pie_chart")
+                    ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
+                    html.Div([
+                        dcc.Graph(id="utopia_total_chart")
+                    ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
+                ]),
+            ], id="utopia_visitation_container", style={"display": "none"}),
         ]),
 
         html.H2("Spell Availability Over Time"),
@@ -1316,49 +1414,55 @@ def run_dashboard(
         html.Label("Select Heatmap Metric"),
         dcc.Dropdown(
             id="heatmap_metric_selector",
-            options=[{"label": m.capitalize(), "value": m} for m in player_metric_options],
+            options=[{"label": metric_label(m), "value": m} for m in player_metric_options],
             value="town_count",
             clearable=False
         ),
 
         dcc.Graph(id="heatmap_chart"),
 
-        html.H2("Fog of War Exploration"),
-
-        html.Label("Select Player"),
-        dcc.Dropdown(
-            id="fog_player_selector",
-            options=[
-                {"label": p, "value": p}
-                for p in PLAYER_ORDER if p in df_players["player_color"].unique()
-            ],
-            value="Red",
-            clearable=False
-        ),
-
         html.Div([
-            html.Button("Play", id="fog_play_btn", n_clicks=0),
-            html.Button("Pause", id="fog_pause_btn", n_clicks=0),
-            dcc.Interval(id="fog_anim_interval", interval=800, n_intervals=0, disabled=True)
-        ], style={"margin": "10px 0"}),
-
-        dcc.Graph(
-            id="fog_of_war_map",
-            style={
-                "width": "1000px",
-                "maxWidth": "100%",
-                "margin": "14px auto 24px",
-            },
-        ),
-
-        dcc.Slider(
-            id="fog_day_slider",
-            min=df_players["day"].min(),
-            max=df_players["day"].max(),
-            step=1,
-            value=df_players["day"].min(),
-            marks={int(day): str(day) for day in df_players["day"].unique()},
-        ),
+            html.H2("Fog of War Exploration"),
+            dcc.Checklist(
+                id="toggle_fog_of_war",
+                options=[{"label": "Show Fog of War Exploration", "value": "show"}],
+                value=[],
+                style={"marginBottom": "10px", "fontWeight": "600"},
+            ),
+            html.Div([
+                html.Label("Select Player"),
+                dcc.Dropdown(
+                    id="fog_player_selector",
+                    options=[
+                        {"label": p, "value": p}
+                        for p in PLAYER_ORDER if p in df_players["player_color"].unique()
+                    ],
+                    value="Red",
+                    clearable=False
+                ),
+                html.Div([
+                    html.Button("Play", id="fog_play_btn", n_clicks=0),
+                    html.Button("Pause", id="fog_pause_btn", n_clicks=0),
+                    dcc.Interval(id="fog_anim_interval", interval=800, n_intervals=0, disabled=True)
+                ], style={"margin": "10px 0"}),
+                dcc.Graph(
+                    id="fog_of_war_map",
+                    style={
+                        "width": "1000px",
+                        "maxWidth": "100%",
+                        "margin": "14px auto 24px",
+                    },
+                ),
+                dcc.Slider(
+                    id="fog_day_slider",
+                    min=df_players["day"].min(),
+                    max=df_players["day"].max(),
+                    step=1,
+                    value=df_players["day"].min(),
+                    marks={int(day): str(day) for day in df_players["day"].unique()},
+                ),
+            ], id="fog_of_war_container", style={"display": "none"}),
+        ]),
     ], className="homm-dashboard")
 
     if live_reload:
@@ -1430,6 +1534,20 @@ def run_dashboard(
         if "show" in value:
             return {"marginBottom": "30px", "display": "block"}
         return {"marginBottom": "30px", "display": "none"}
+
+    @app.callback(
+        Output("utopia_visitation_container", "style"),
+        Input("toggle_utopia_visitation", "value"),
+    )
+    def toggle_utopia_visitation(value):
+        return {"display": "block" if "show" in (value or []) else "none"}
+
+    @app.callback(
+        Output("fog_of_war_container", "style"),
+        Input("toggle_fog_of_war", "value"),
+    )
+    def toggle_fog_of_war(value):
+        return {"display": "block" if "show" in (value or []) else "none"}
 
     # Update hero selector based on player selection
     @app.callback(
@@ -1609,7 +1727,7 @@ def run_dashboard(
                     x=group["day"],
                     y=group[metric],
                     mode="lines+markers",
-                    name=f"{player} - {metric.capitalize()}",
+                    name=f"{player} - {metric_label(metric)}",
                     line=dict(color=color),
                     marker=dict(color=color)
                 ))
@@ -1645,6 +1763,7 @@ def run_dashboard(
             "wood_and_ore": "🪵",
             "rare_resources": "💎",
             "gold": "🪙",
+            "mine_score": "⛏️",
             "visited_utopias": "🐉",
             "visited_obelisks": "🗿",
             "total_army_strength": "⚔️",
@@ -2014,59 +2133,16 @@ def run_dashboard(
         if not selected_players:
             return go.Figure()
 
-        # Filter to selected day
-        heroes_filtered = df_heroes_army_levels[df_heroes_army_levels["Day"] == selected_day].copy()
-        towns_filtered  = df_towns_army_levels[df_towns_army_levels["Day"] == selected_day].copy()
-
-        # Army columns = union of heroes+towns minus non-army columns
-        exclude_cols = {"Hero", "Town", "Owner", "Day"}
-        army_cols = sorted((set(heroes_filtered.columns) | set(towns_filtered.columns)) - exclude_cols)
-
-        # Ensure both have same army columns
-        for col in army_cols:
-            if col not in heroes_filtered:
-                heroes_filtered[col] = 0
-            if col not in towns_filtered:
-                towns_filtered[col] = 0
-
-        for df in (heroes_filtered, towns_filtered):
-            for col in army_cols:
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
-
-        # Group by Owner
-        heroes_grouped = heroes_filtered.groupby("Owner", as_index=False)[army_cols].sum()
-        towns_grouped  = towns_filtered.groupby("Owner",  as_index=False)[army_cols].sum()
-
-        # Merge hero + town contributions
-        combined = pd.merge(
-            heroes_grouped, towns_grouped,
-            on="Owner", how="outer", suffixes=("_h", "_t")
-        ).fillna(0)
-
-        # Collapse hero + town into total
-        for col in army_cols:
-            h_col, t_col = f"{col}_h", f"{col}_t"
-            h_vals = pd.to_numeric(combined[h_col], errors="coerce").fillna(0).astype(int) if h_col in combined else 0
-            t_vals = pd.to_numeric(combined[t_col], errors="coerce").fillna(0).astype(int) if t_col in combined else 0
-            combined[col] = h_vals + t_vals
-            combined.drop(columns=[c for c in (h_col, t_col) if c in combined], inplace=True)
-
-        # Filter only selected players
-        combined = combined[combined["Owner"].isin(selected_players)]
+        combined = build_player_army_composition(
+            df_heroes_army_levels,
+            df_towns_army_levels,
+            selected_players,
+            selected_day,
+        )
         if combined.empty:
             return go.Figure()
 
-        # --- Enforce player order ---
-        PLAYER_ORDER = ["Red", "Blue", "Tan", "Green", "Orange", "Purple", "Teal", "Pink", "None"]
-        combined["Owner"] = pd.Categorical(combined["Owner"], categories=PLAYER_ORDER, ordered=True)
-        combined = combined.sort_values("Owner")
-
-        # Sort columns: 1, 1+, 2, 2+, ...
-        import re
-        def sort_key(c):
-            m = re.match(r"(\d+)", c)
-            return (int(m.group(1)), "+" in c) if m else (999, c)
-        army_cols_sorted = sorted(army_cols, key=sort_key)
+        army_cols_sorted = list(map(str, range(1, 8)))
 
         # --- Build grouped stacked bar chart ---
         fig = go.Figure()
@@ -2085,7 +2161,7 @@ def run_dashboard(
         fig.update_layout(
             barmode="group",  # bars side by side per level, colored by player
             title=f"Total Army Composition by Player (Day {selected_day})",
-            xaxis_title="Unit Level",
+            xaxis_title="Creature Tier (base + upgraded)",
             yaxis_title="Number of Units",
             legend_title="Player"
         )
@@ -2186,11 +2262,11 @@ def run_dashboard(
             y=pivot.index,
             colorscale="YlGnBu",
             hoverongaps=False,
-            colorbar=dict(title=selected_metric.capitalize())
+            colorbar=dict(title=metric_label(selected_metric))
         ))
 
         fig.update_layout(
-            title=f"{selected_metric.capitalize()} Timeline Heatmap",
+            title=f"{metric_label(selected_metric)} Timeline Heatmap",
             xaxis_title="Game Day",
             yaxis_title="Player",
             yaxis=dict(autorange="reversed")  # Top = Red
@@ -2202,10 +2278,11 @@ def run_dashboard(
         Output("utopia_pie_chart", "figure"),
         Input("player_selector", "value"),
         Input("day_slider", "value"),
-        Input("utopia_view_mode", "value")
+        Input("utopia_view_mode", "value"),
+        Input("toggle_utopia_visitation", "value"),
     )
-    def update_utopia_pie(selected_players, selected_day, view_mode):
-        if df_players.empty or selected_day is None:
+    def update_utopia_pie(selected_players, selected_day, view_mode, visibility):
+        if "show" not in (visibility or []) or df_players.empty or selected_day is None:
             return go.Figure()
 
         current = df_players[df_players["day"] == selected_day]
@@ -2249,10 +2326,11 @@ def run_dashboard(
     
     @app.callback(
         Output("utopia_total_chart", "figure"),
-        Input("day_slider", "value")
+        Input("day_slider", "value"),
+        Input("toggle_utopia_visitation", "value"),
     )
-    def update_utopia_total_chart(selected_day):
-        if df_players.empty or selected_day is None:
+    def update_utopia_total_chart(selected_day, visibility):
+        if "show" not in (visibility or []) or df_players.empty or selected_day is None:
             return go.Figure()
 
         # Filter to selected day and ignore 'None'
@@ -2319,10 +2397,11 @@ def run_dashboard(
     @app.callback(
         Output("fog_of_war_map", "figure"),
         Input("fog_player_selector", "value"),
-        Input("fog_day_slider", "value")
+        Input("fog_day_slider", "value"),
+        Input("toggle_fog_of_war", "value"),
     )
-    def update_fog_map(player_color, selected_day):
-        if not player_color or selected_day is None:
+    def update_fog_map(player_color, selected_day, visibility):
+        if "show" not in (visibility or []) or not player_color or selected_day is None:
             return go.Figure()
 
         row = df_players[
