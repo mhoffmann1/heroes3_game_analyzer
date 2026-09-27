@@ -2,6 +2,24 @@
 
 ## How to run
 
+### Environment setup
+
+The analyzer requires Python 3.10 or newer. Create the project environment and
+install its direct runtime dependencies from the repository root:
+
+```bash
+python3 -m venv venv_heroes
+venv_heroes/bin/python -m pip install --upgrade pip
+venv_heroes/bin/python -m pip install -r requirements.txt
+```
+
+The desktop launcher also uses Python's standard `tkinter` module. On Ubuntu or
+Debian systems, install it separately if it is not already available:
+
+```bash
+sudo apt install python3-tk
+```
+
 ### Desktop launcher and live dashboard
 
 Start the GUI from the repository root with the project's Python environment:
@@ -29,9 +47,6 @@ builds the incremental cache once.
 After processing, the launcher restarts the dashboard and open dashboard tabs
 reload automatically. Use **Stop** or close the GUI to stop both monitoring and
 the dashboard server.
-
-The GUI uses Python's standard `tkinter` module. On Linux distributions where it
-is packaged separately, install the package named `python3-tk`.
 
 To decompress single save for manual analysys:
 
@@ -170,6 +185,21 @@ Run the transfer tests with:
 ```bash
 venv_heroes/bin/python -m unittest tests/test_swap_hero.py
 ```
+
+### Hero transfer GUI
+
+Start the graphical front end from the repository root:
+
+```bash
+venv_heroes/bin/python swap_hero_gui.py
+```
+
+Choose the source save containing the developed hero, type the hero name, and
+select the new owner and an empty surface tile. The included `arena.GM4` is the
+default base save. The result is always written to a separate file. To add more
+than one hero, continue in the same window: after a successful transfer, the
+result becomes the next arena/base save, the X coordinate advances by one, and
+the GUI proposes a new numbered result filename.
 
 ## Current state
 

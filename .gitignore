@@ -23,6 +23,7 @@ h3tools.zip
 other
 *.bin
 *.txt
+!requirements.txt
 *.log
 *.GM*
 !arena.GM4

@@ -267,9 +267,18 @@ def _find_source_hero_object_id(save, hero_span: HeroSpan) -> int:
             f"coordinates are ({x},{y},{z})."
         )
 
-    # Most saves place the map object at the hero coordinates. Some hero
-    # orientations use the neighbouring visual anchor, so check those too.
-    candidates = ((x, y), (x - 1, y), (x, y - 1), (x - 1, y - 1))
+    # HoTA's hero record stores the visible position two tiles to the right of
+    # the adventure-map object anchor. Check that confirmed layout first. The
+    # remaining positions preserve compatibility with saves using the older
+    # one-tile or same-tile layouts.
+    candidates = (
+        (x - 2, y),
+        (x - 1, y),
+        (x, y),
+        (x - 2, y - 1),
+        (x - 1, y - 1),
+        (x, y - 1),
+    )
     for tile_x, tile_y in candidates:
         if not (0 <= tile_x < map_size and 0 <= tile_y < map_size):
             continue
