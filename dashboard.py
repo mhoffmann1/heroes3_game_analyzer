@@ -1362,28 +1362,35 @@ def run_dashboard(
 
         dcc.Graph(id="town_pie_chart"),
 
-        html.H2("Utopia Visitation"),
-
-        html.Label("View Mode"),
-        dcc.RadioItems(
-            id="utopia_view_mode",
-            options=[
-                {"label": "Count", "value": "count"},
-                {"label": "Percentage", "value": "percentage"}
-            ],
-            value="count",
-            labelStyle={"display": "inline-block", "margin-right": "15px"},
-            inputStyle={"margin-right": "5px"}
-        ),
-
         html.Div([
+            html.H2("Utopia Visitation"),
+            dcc.Checklist(
+                id="toggle_utopia_visitation",
+                options=[{"label": "Show Utopia Visitation", "value": "show"}],
+                value=[],
+                style={"marginBottom": "10px", "fontWeight": "600"},
+            ),
             html.Div([
-                dcc.Graph(id="utopia_pie_chart")
-            ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
-
-            html.Div([
-                dcc.Graph(id="utopia_total_chart")
-            ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
+                html.Label("View Mode"),
+                dcc.RadioItems(
+                    id="utopia_view_mode",
+                    options=[
+                        {"label": "Count", "value": "count"},
+                        {"label": "Percentage", "value": "percentage"}
+                    ],
+                    value="count",
+                    labelStyle={"display": "inline-block", "margin-right": "15px"},
+                    inputStyle={"margin-right": "5px"}
+                ),
+                html.Div([
+                    html.Div([
+                        dcc.Graph(id="utopia_pie_chart")
+                    ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
+                    html.Div([
+                        dcc.Graph(id="utopia_total_chart")
+                    ], style={"width": "50%", "display": "inline-block", "verticalAlign": "top"}),
+                ]),
+            ], id="utopia_visitation_container", style={"display": "none"}),
         ]),
 
         html.H2("Spell Availability Over Time"),
@@ -1414,42 +1421,48 @@ def run_dashboard(
 
         dcc.Graph(id="heatmap_chart"),
 
-        html.H2("Fog of War Exploration"),
-
-        html.Label("Select Player"),
-        dcc.Dropdown(
-            id="fog_player_selector",
-            options=[
-                {"label": p, "value": p}
-                for p in PLAYER_ORDER if p in df_players["player_color"].unique()
-            ],
-            value="Red",
-            clearable=False
-        ),
-
         html.Div([
-            html.Button("Play", id="fog_play_btn", n_clicks=0),
-            html.Button("Pause", id="fog_pause_btn", n_clicks=0),
-            dcc.Interval(id="fog_anim_interval", interval=800, n_intervals=0, disabled=True)
-        ], style={"margin": "10px 0"}),
-
-        dcc.Graph(
-            id="fog_of_war_map",
-            style={
-                "width": "1000px",
-                "maxWidth": "100%",
-                "margin": "14px auto 24px",
-            },
-        ),
-
-        dcc.Slider(
-            id="fog_day_slider",
-            min=df_players["day"].min(),
-            max=df_players["day"].max(),
-            step=1,
-            value=df_players["day"].min(),
-            marks={int(day): str(day) for day in df_players["day"].unique()},
-        ),
+            html.H2("Fog of War Exploration"),
+            dcc.Checklist(
+                id="toggle_fog_of_war",
+                options=[{"label": "Show Fog of War Exploration", "value": "show"}],
+                value=[],
+                style={"marginBottom": "10px", "fontWeight": "600"},
+            ),
+            html.Div([
+                html.Label("Select Player"),
+                dcc.Dropdown(
+                    id="fog_player_selector",
+                    options=[
+                        {"label": p, "value": p}
+                        for p in PLAYER_ORDER if p in df_players["player_color"].unique()
+                    ],
+                    value="Red",
+                    clearable=False
+                ),
+                html.Div([
+                    html.Button("Play", id="fog_play_btn", n_clicks=0),
+                    html.Button("Pause", id="fog_pause_btn", n_clicks=0),
+                    dcc.Interval(id="fog_anim_interval", interval=800, n_intervals=0, disabled=True)
+                ], style={"margin": "10px 0"}),
+                dcc.Graph(
+                    id="fog_of_war_map",
+                    style={
+                        "width": "1000px",
+                        "maxWidth": "100%",
+                        "margin": "14px auto 24px",
+                    },
+                ),
+                dcc.Slider(
+                    id="fog_day_slider",
+                    min=df_players["day"].min(),
+                    max=df_players["day"].max(),
+                    step=1,
+                    value=df_players["day"].min(),
+                    marks={int(day): str(day) for day in df_players["day"].unique()},
+                ),
+            ], id="fog_of_war_container", style={"display": "none"}),
+        ]),
     ], className="homm-dashboard")
 
     if live_reload:
@@ -1521,6 +1534,20 @@ def run_dashboard(
         if "show" in value:
             return {"marginBottom": "30px", "display": "block"}
         return {"marginBottom": "30px", "display": "none"}
+
+    @app.callback(
+        Output("utopia_visitation_container", "style"),
+        Input("toggle_utopia_visitation", "value"),
+    )
+    def toggle_utopia_visitation(value):
+        return {"display": "block" if "show" in (value or []) else "none"}
+
+    @app.callback(
+        Output("fog_of_war_container", "style"),
+        Input("toggle_fog_of_war", "value"),
+    )
+    def toggle_fog_of_war(value):
+        return {"display": "block" if "show" in (value or []) else "none"}
 
     # Update hero selector based on player selection
     @app.callback(
@@ -2251,10 +2278,11 @@ def run_dashboard(
         Output("utopia_pie_chart", "figure"),
         Input("player_selector", "value"),
         Input("day_slider", "value"),
-        Input("utopia_view_mode", "value")
+        Input("utopia_view_mode", "value"),
+        Input("toggle_utopia_visitation", "value"),
     )
-    def update_utopia_pie(selected_players, selected_day, view_mode):
-        if df_players.empty or selected_day is None:
+    def update_utopia_pie(selected_players, selected_day, view_mode, visibility):
+        if "show" not in (visibility or []) or df_players.empty or selected_day is None:
             return go.Figure()
 
         current = df_players[df_players["day"] == selected_day]
@@ -2298,10 +2326,11 @@ def run_dashboard(
     
     @app.callback(
         Output("utopia_total_chart", "figure"),
-        Input("day_slider", "value")
+        Input("day_slider", "value"),
+        Input("toggle_utopia_visitation", "value"),
     )
-    def update_utopia_total_chart(selected_day):
-        if df_players.empty or selected_day is None:
+    def update_utopia_total_chart(selected_day, visibility):
+        if "show" not in (visibility or []) or df_players.empty or selected_day is None:
             return go.Figure()
 
         # Filter to selected day and ignore 'None'
@@ -2368,10 +2397,11 @@ def run_dashboard(
     @app.callback(
         Output("fog_of_war_map", "figure"),
         Input("fog_player_selector", "value"),
-        Input("fog_day_slider", "value")
+        Input("fog_day_slider", "value"),
+        Input("toggle_fog_of_war", "value"),
     )
-    def update_fog_map(player_color, selected_day):
-        if not player_color or selected_day is None:
+    def update_fog_map(player_color, selected_day, visibility):
+        if "show" not in (visibility or []) or not player_color or selected_day is None:
             return go.Figure()
 
         row = df_players[
