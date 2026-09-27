@@ -106,6 +106,7 @@ def get_hero_army_achievement_metrics(hero_data):
     represented_tiers = {stack["tier"] for stack in stacks if stack["tier"] is not None}
     tier_seven_total = sum(stack["count"] for stack in tier_seven)
     tier_seven_types = len({stack["name"] for stack in tier_seven if stack["name"]})
+    distinct_unit_names = {stack["name"] for stack in stacks if stack["name"]}
 
     return {
         "has_tier_seven": int(bool(tier_seven)),
@@ -121,6 +122,7 @@ def get_hero_army_achievement_metrics(hero_data):
         "full_battle_line": int(set(range(1, 8)).issubset(represented_tiers)),
         "no_weaklings": int(
             len(stacks) == 7
+            and len(distinct_unit_names) == 7
             and all((stack["tier"] or 0) >= 6 for stack in stacks)
         ),
     }
@@ -436,9 +438,7 @@ def get_achievement_definitions(game_info=None):
     game_info = game_info or {}
     definitions = [
         ("First Utopia", "Conquer a Dragon Utopia", "visited_utopias", 1, 2),
-        ("Utopia Raider", "Conquer 3 Dragon Utopias", "visited_utopias", 3, 3),
-        ("Dragon Hoard Hunter", "Conquer 5 Dragon Utopias", "visited_utopias", 5, 3),
-        ("Utopia Overlord", "Conquer 10 Dragon Utopias", "visited_utopias", 10, 5),
+        ("Utopia Raider", "Conquer 4 Dragon Utopias", "visited_utopias", 4, 3),
         ("Four-Town Realm", "Control 4 towns", "town_count", 4, 1),
         ("Eight-Town Kingdom", "Control 8 towns", "town_count", 8, 2),
         ("Twelve-Town Empire", "Control 12 towns", "town_count", 12, 3),
@@ -458,7 +458,6 @@ def get_achievement_definitions(game_info=None):
         ("Iron Garrison", "Reach 500,000 town-garrison strength", "total_garrison_army_strength", 500_000, 2),
         ("Fortress Network", "Reach 2,000,000 town-garrison strength", "total_garrison_army_strength", 2_000_000, 3),
         ("Balanced Forces", "Control 3 heroes with at least 250,000 army strength each", "heroes_over_250k", 3, 3),
-        ("Seven Samurai", "Control 7 heroes with at least 10,000 army strength each", "armed_heroes", 7, 2),
         ("Arcane General", "One hero has 1,000,000 army strength and all three adventure spells", "arcane_generals", 1, 3),
         ("Renaissance Hero", "One hero reaches 10 in every primary skill", "renaissance_heroes", 1, 3),
         ("Master of Attack", "One hero reaches 30 Attack", "highest_attack", 30, 3),
@@ -476,7 +475,7 @@ def get_achievement_definitions(game_info=None):
         ("A Thousand Strong", "Have 1,000 creatures in one hero army stack", "largest_stack", 1_000, 3),
         ("Army of Giants", "One hero commands 250 tier-6-or-higher creatures", "tier_six_army_total", 250, 3),
         ("Full Battle Line", "One hero commands creatures representing all seven tiers", "full_battle_line", 1, 3),
-        ("No Weaklings Allowed", "Fill all seven hero army slots with tier-6-or-higher creatures", "no_weaklings", 1, 5),
+        ("No Weaklings Allowed", "Fill all seven hero army slots with distinct tier-6-or-higher creatures", "no_weaklings", 1, 5),
         ("First Expansion", "Control a second town", "town_count", 2, 1),
         ("Landlord", "Control 6 towns", "town_count", 6, 2),
         ("Realm Without Borders", "Control 16 towns", "town_count", 16, 4),
@@ -499,43 +498,31 @@ def get_achievement_definitions(game_info=None):
         ("Master of the Deep", "Control 20 mines of any kind", "total_mines", 20, 4),
         ("Master of the Elements", "Control an Alchemist's Lab, Sulfur Dune, Crystal Cavern, and Gem Pond", "rare_mine_set", 1, 3),
         ("Gold Rush", "Take control of a Gold Mine", "gold_mines", 1, 2),
-        ("First Great Spell", "Gain any major adventure spell", "major_adventure_spells", 1, 1),
+        ("First Great Spell", "Gain any major adventure spell", "major_adventure_spells", 1, 0),
         ("Town Portal", "Gain access to Town Portal", "has_tp", 1, 2),
-        ("Master of Flight", "Gain access to Fly", "has_fly", 1, 2),
+        ("Master of Flight", "Gain access to Fly", "has_fly", 1, 1),
         ("Dimension Traveller", "Gain access to Dimension Door", "has_dd", 1, 2),
         ("Master of the Adventure Map", "Gain all three adventure spells", "all_adventure_spells", 1, 3),
-        ("Portal Network", "Gain Town Portal while controlling at least 4 towns", "portal_network", 1, 3),
         ("Arcane Supremacy", "Have Town Portal, Fly, and Dimension Door on 3 different heroes", "distinct_spell_masters", 1, 3),
         ("Magical Dynasty", "Control 3 heroes that each know a major adventure spell", "major_spell_heroes", 3, 3),
-        ("First Clue", "Discover an Obelisk", "visited_obelisks", 1, 1),
-        ("Puzzle Seeker", "Discover 3 Obelisks", "visited_obelisks", 3, 2),
-        ("Puzzle Scholar", "Discover 5 Obelisks", "visited_obelisks", 5, 2),
-        ("Grail Hunter", "Discover 10 Obelisks", "visited_obelisks", 10, 3),
         ("Heroic Entourage", "Control 8 heroes", "heroes_controlled", 8, 2),
-        ("Dragon Hunter", "Conquer 2 Utopias within 2 days", "utopias_in_two_days", 2, 3),
-        ("Dragonbane", "Conquer 4 Utopias within 7 days", "utopias_in_seven_days", 4, 4),
-        ("Utopia Rush", "Conquer a Utopia by day 28", "utopia_rush", 1, 3),
-        ("One Champion", "With at least 100,000 total army strength, one hero commands at least 80% of hero army strength", "one_champion", 1, 2),
-        ("Council of War", "Three heroes each command at least 20% of hero army strength", "council_of_war", 1, 3),
-        ("Nomad", "Reach 1,000,000 army strength while controlling at most one town", "nomad", 1, 3),
+        ("Nomad", "Reach 1,000,000 army strength while controlling at most one town", "nomad", 1, 1),
         ("Poor but Dangerous", "Lead army strength while holding the least gold", "poor_but_dangerous", 1, 3),
         ("Rich but Harmless", "Hold at least 10,000 gold, lead in gold, and have the weakest army", "rich_but_harmless", 1, 2),
         ("Mayor, Not General", "Lead in towns while having the weakest army", "mayor_not_general", 1, 2),
-        ("Turtle King", "With at least 100,000 total army strength, lead in garrison strength without leading hero-army strength", "turtle_king", 1, 2),
+        ("Turtle King", "With at least 100,000 total army strength, lead in garrison strength without leading hero-army strength", "turtle_king", 1, 1),
         ("Glass Cannon", "Reach at least 10 Attack, lead in hero Attack, and trail in hero Defense", "glass_cannon", 1, 2),
         ("Speedrunner", "Unlock 3 other achievements on the same day", "achievements_same_day", 3, 3),
     ]
     total_obelisks = int(game_info.get("total_obelisks", 0) or 0)
     if total_obelisks:
-        definitions.append(
-            ("Puzzle Master", "Discover every Obelisk", "visited_obelisks", total_obelisks, 5)
-        )
-        definitions.append(
-            ("Grail Vision", "Discover at least half of all Obelisks", "visited_obelisks", math.ceil(total_obelisks / 2), 3)
-        )
-        definitions.append(
-            ("Obelisk Dominance", "Discover more Obelisks than all opponents combined, with at least 5", "obelisk_dominance", 1, 4)
-        )
+        definitions.extend([
+            ("Grail Glimpse", "Discover 10% of all Obelisks", "visited_obelisks", math.ceil(total_obelisks * 0.10), 1),
+            ("Puzzle Seeker", "Discover 25% of all Obelisks", "visited_obelisks", math.ceil(total_obelisks * 0.25), 2),
+            ("Grail Vision", "Discover 50% of all Obelisks", "visited_obelisks", math.ceil(total_obelisks * 0.50), 3),
+            ("Grail Hunter", "Discover 75% of all Obelisks", "visited_obelisks", math.ceil(total_obelisks * 0.75), 4),
+            ("Puzzle Master", "Discover every Obelisk", "visited_obelisks", total_obelisks, 5),
+        ])
     total_utopias = int(game_info.get("total_utopias", 0) or 0)
     if total_utopias:
         definitions.append(
@@ -596,7 +583,6 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
             or (isinstance(value, str) and value.lower() == "true")
         )
     heroes["heroes_over_250k"] = (heroes["army_strength"] >= 250_000).astype(int)
-    heroes["armed_heroes"] = (heroes["army_strength"] >= 10_000).astype(int)
     heroes["heroes_level_15"] = (heroes["level"] >= 15).astype(int)
     heroes["heroes_level_20"] = (heroes["level"] >= 20).astype(int)
     heroes["renaissance_heroes"] = (
@@ -607,9 +593,6 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
     heroes["arcane_generals"] = (
         (heroes["army_strength"] >= 1_000_000) & (heroes["major_spell_count"] == 3)
     ).astype(int)
-    hero_totals = heroes.groupby(["day", "player_color"])["army_strength"].transform("sum")
-    heroes["army_share"] = np.where(hero_totals > 0, heroes["army_strength"] / hero_totals, 0)
-    heroes["council_members"] = (heroes["army_share"] >= 0.20).astype(int)
 
     hero_daily = heroes.groupby(["day", "player_color"]).agg(
         highest_hero_level=("level", "max"),
@@ -624,13 +607,11 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         highest_power=("power", "max"),
         highest_knowledge=("knowledge", "max"),
         heroes_over_250k=("heroes_over_250k", "sum"),
-        armed_heroes=("armed_heroes", "sum"),
         heroes_level_15=("heroes_level_15", "sum"),
         heroes_level_20=("heroes_level_20", "sum"),
         renaissance_heroes=("renaissance_heroes", "sum"),
         major_spell_heroes=("major_spell_heroes", "sum"),
         arcane_generals=("arcane_generals", "sum"),
-        council_members=("council_members", "sum"),
         has_tier_seven=("has_tier_seven", "max"),
         largest_stack=("largest_stack", "max"),
         largest_tier_six_stack=("largest_tier_six_stack", "max"),
@@ -668,9 +649,8 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         "highest_hero_level", "heroes_controlled", "has_tp", "has_fly", "has_dd",
         "strongest_hero_army", "combined_hero_experience", "highest_attack",
         "highest_defense", "highest_power", "highest_knowledge", "heroes_over_250k",
-        "armed_heroes", "heroes_level_15", "heroes_level_20", "renaissance_heroes",
+        "heroes_level_15", "heroes_level_20", "renaissance_heroes",
         "major_spell_heroes", "arcane_generals", "distinct_spell_masters",
-        "council_members",
         "has_tier_seven", "largest_stack", "largest_tier_six_stack",
         "largest_tier_seven_stack", "tier_six_army_total", "mythical_host",
         "full_battle_line", "no_weaklings",
@@ -696,45 +676,11 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
     players["rapid_expansion"] = (
         (players["town_count"] >= 4) & (players["day"] <= 28)
     ).astype(int)
-    players["portal_network"] = ((players["has_tp"] > 0) & (players["town_count"] >= 4)).astype(int)
-    players["utopia_rush"] = ((players["visited_utopias"] >= 1) & (players["day"] <= 28)).astype(int)
-    players["one_champion"] = (
-        (players["total_army_strength"] >= 100_000)
-        & (players["total_hero_army_strength"] > 0)
-        & (players["strongest_hero_army"] >= players["total_hero_army_strength"] * 0.80)
-    ).astype(int)
-    players["council_of_war"] = (players["council_members"] >= 3).astype(int)
     players["nomad"] = (
         (players["total_army_strength"] >= 1_000_000) & (players["town_count"] <= 1)
     ).astype(int)
 
     players = players.sort_values(["player_color", "day"], kind="stable")
-    players["utopias_in_two_days"] = 0
-    players["utopias_in_seven_days"] = 0
-    for _player, indices in players.groupby("player_color").groups.items():
-        player_history = players.loc[indices].sort_values("day")
-        for index, row in player_history.iterrows():
-            before_two_day_window = player_history[
-                player_history["day"] < row["day"] - 1
-            ]
-            two_day_baseline = (
-                before_two_day_window["visited_utopias"].iloc[-1]
-                if not before_two_day_window.empty else 0
-            )
-            players.at[index, "utopias_in_two_days"] = (
-                row["visited_utopias"] - two_day_baseline
-            )
-            before_seven_day_window = player_history[
-                player_history["day"] < row["day"] - 6
-            ]
-            seven_day_baseline = (
-                before_seven_day_window["visited_utopias"].iloc[-1]
-                if not before_seven_day_window.empty else 0
-            )
-            players.at[index, "utopias_in_seven_days"] = (
-                row["visited_utopias"] - seven_day_baseline
-            )
-
     day_groups = players.groupby("day")
     max_army = day_groups["total_army_strength"].transform("max")
     min_army = day_groups["total_army_strength"].transform("min")
@@ -754,10 +700,6 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
     players["mayor_not_general"] = ((max_towns > min_towns) & (max_army > min_army) & (players["town_count"] == max_towns) & (players["total_army_strength"] == min_army)).astype(int)
     players["turtle_king"] = ((players["total_army_strength"] >= 100_000) & (max_garrison > min_garrison) & (players["total_garrison_army_strength"] == max_garrison) & (players["total_hero_army_strength"] < max_hero_army)).astype(int)
     players["glass_cannon"] = ((players["highest_attack"] >= 10) & (max_attack > min_attack) & (max_defense > min_defense) & (players["highest_attack"] == max_attack) & (players["highest_defense"] == min_defense)).astype(int)
-    opponent_obelisks = day_groups["visited_obelisks"].transform("sum") - players["visited_obelisks"]
-    players["obelisk_dominance"] = (
-        (players["visited_obelisks"] >= 5) & (players["visited_obelisks"] > opponent_obelisks)
-    ).astype(int)
 
     definitions = get_achievement_definitions(game_info)
 
@@ -782,6 +724,10 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
             })
     same_day_counts = {}
     for award in awards:
+        # Fun-only, zero-point achievements must not indirectly generate
+        # points by helping to unlock Speedrunner.
+        if award["points"] <= 0:
+            continue
         count_key = (award["player"], award["day"])
         same_day_counts[count_key] = same_day_counts.get(count_key, 0) + 1
     speedrunner_candidates = [

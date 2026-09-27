@@ -299,7 +299,7 @@ class AchievementTests(unittest.TestCase):
             {award["player"] for award in by_key["Gold Rush"]},
         )
 
-    def test_definitions_contain_final_one_to_five_point_values(self):
+    def test_definitions_contain_final_zero_to_five_point_values(self):
         definitions = get_achievement_definitions({
             "total_obelisks": 10,
             "total_utopias": 8,
@@ -308,7 +308,53 @@ class AchievementTests(unittest.TestCase):
         })
 
         self.assertTrue(definitions)
-        self.assertTrue(all(1 <= definition[4] <= 5 for definition in definitions))
+        self.assertTrue(all(0 <= definition[4] <= 5 for definition in definitions))
+
+    def test_revised_achievement_definitions(self):
+        definitions = {
+            definition[0]: definition
+            for definition in get_achievement_definitions({
+                "total_obelisks": 20,
+                "total_utopias": 10,
+            })
+        }
+
+        self.assertEqual(0, definitions["First Great Spell"][4])
+        self.assertEqual(1, definitions["Master of Flight"][4])
+        self.assertEqual(1, definitions["Nomad"][4])
+        self.assertEqual(1, definitions["Turtle King"][4])
+        self.assertEqual(4, definitions["Utopia Raider"][3])
+        self.assertEqual(5, definitions["Hoard Monopoly"][3])
+        self.assertEqual(2, definitions["Grail Glimpse"][3])
+        self.assertEqual(5, definitions["Puzzle Seeker"][3])
+        self.assertEqual(10, definitions["Grail Vision"][3])
+        self.assertEqual(15, definitions["Grail Hunter"][3])
+        self.assertEqual(20, definitions["Puzzle Master"][3])
+        for removed in [
+            "Portal Network", "One Champion", "Council of War",
+            "Seven Samurai", "Dragon Hoard Hunter", "Utopia Overlord",
+            "Dragon Hunter", "Dragonbane", "Utopia Rush",
+        ]:
+            self.assertNotIn(removed, definitions)
+
+    def test_zero_point_achievement_does_not_help_unlock_speedrunner(self):
+        players = pd.DataFrame([
+            {"day": 30, "player_color": "Red"},
+        ])
+        heroes = pd.DataFrame([
+            {
+                "day": 30, "player_color": "Red", "hero_name": "Aeris",
+                "level": 5, "has_fly": True,
+            },
+        ])
+
+        awards = build_achievement_awards(players, heroes)
+        names = {award["key"] for award in awards}
+
+        self.assertIn("First Great Spell", names)
+        self.assertIn("Master of Flight", names)
+        self.assertIn("Rising Hero", names)
+        self.assertNotIn("Speedrunner", names)
 
     def test_rapid_expansion_deadline_is_day_28(self):
         definitions = {
@@ -387,8 +433,6 @@ class AchievementTests(unittest.TestCase):
 
         awards = {award["key"]: award for award in build_achievement_awards(players, heroes)}
 
-        self.assertEqual(2, awards["Seven Samurai"]["day"])
-        self.assertEqual(2, awards["One Champion"]["day"])
         self.assertEqual(2, awards["Turtle King"]["day"])
 
     def test_awards_all_first_day_qualifiers_for_achievement_ties(self):
@@ -421,7 +465,7 @@ class AchievementTests(unittest.TestCase):
         ])
 
         awards = build_achievement_awards(
-            players, heroes, {"total_obelisks": 3}
+            players, heroes, {"total_obelisks": 3, "total_utopias": 10}
         )
         by_key = {}
         for award in awards:
@@ -432,8 +476,7 @@ class AchievementTests(unittest.TestCase):
             {award["player"] for award in by_key["First Utopia"]},
         )
         self.assertEqual("Blue", by_key["Utopia Raider"][0]["player"])
-        self.assertEqual("Blue", by_key["Dragon Hoard Hunter"][0]["player"])
-        self.assertEqual("Blue", by_key["Utopia Overlord"][0]["player"])
+        self.assertEqual("Blue", by_key["Hoard Monopoly"][0]["player"])
         self.assertEqual(
             {"Red", "Blue"},
             {award["player"] for award in by_key["Four-Town Realm"]},
@@ -446,7 +489,12 @@ class AchievementTests(unittest.TestCase):
             {"Red", "Blue"},
             {award["player"] for award in by_key["Master of the Adventure Map"]},
         )
-        self.assertEqual("Blue", by_key["Puzzle Seeker"][0]["player"])
+        self.assertEqual(
+            {"Red", "Blue"},
+            {award["player"] for award in by_key["Puzzle Seeker"]},
+        )
+        self.assertEqual("Blue", by_key["Grail Vision"][0]["player"])
+        self.assertEqual("Blue", by_key["Grail Hunter"][0]["player"])
         self.assertEqual("Blue", by_key["Puzzle Master"][0]["player"])
         self.assertEqual(2, by_key["Puzzle Master"][0]["day"])
 

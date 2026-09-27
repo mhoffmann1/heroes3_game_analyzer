@@ -59,6 +59,19 @@ class ArmyAchievementMetricTests(unittest.TestCase):
 
         self.assertEqual(0, metrics["mythical_host"])
 
+    def test_no_weaklings_rejects_split_stacks_of_the_same_unit(self):
+        duplicate_metrics = get_hero_army_achievement_metrics({"army": [
+            {"name": "Titan", "count": 1, "level": 7}
+            for _slot in range(7)
+        ]})
+        distinct_metrics = get_hero_army_achievement_metrics({"army": [
+            {"name": f"Elite {slot}", "count": 1, "level": "6+"}
+            for slot in range(7)
+        ]})
+
+        self.assertEqual(0, duplicate_metrics["no_weaklings"])
+        self.assertEqual(1, distinct_metrics["no_weaklings"])
+
     def test_awards_only_hero_army_achievements(self):
         players = pd.DataFrame([
             {"day": day, "player_color": player}
