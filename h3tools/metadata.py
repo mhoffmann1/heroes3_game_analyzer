@@ -1834,6 +1834,9 @@ class Savefile(object):
     def find_hero_section_start(self):
         """Find the start offset of the hero section using HERO_REGEX."""
         REGEX = h3tools.version.adapt("hero_regex", HERO_REGEX, version=self.version)
+        version_module = h3tools.version.VERSIONS.get(self.version)
+        if hasattr(version_module, "get_hero_regex"):
+            REGEX = version_module.get_hero_regex(self)
         pos = 30000  # Start search at 0x7530
         match = REGEX.search(self.raw[pos:])
         if match:
@@ -1995,6 +1998,9 @@ class Savefile(object):
         rgx_strip = re.compile(br"^(?!\xFF+\x00+$)([^\x00-\x19]+)\x00+$")
         rgx_nulls = re.compile(br"^(\x00+)|(\x00{4}\xFF{4})+$")
         REGEX = h3tools.version.adapt("hero_regex", HERO_REGEX, version=self.version)
+        version_module = h3tools.version.VERSIONS.get(self.version)
+        if hasattr(version_module, "get_hero_regex"):
+            REGEX = version_module.get_hero_regex(self)
         pos = 30000
         m = re.search(REGEX, self.raw[pos:])
         while m:

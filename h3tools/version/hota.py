@@ -411,6 +411,25 @@ HERO_REGEX = re.compile(b"""
     [\x00-\x1D]{30}          #  30 bytes: skill slots                         1061-1089
 """, re.VERBOSE | re.DOTALL)
 
+# HotA versions before 1.8 do not have the Runes secondary skill. Their hero
+# records therefore contain 29 skill-level and skill-slot bytes instead of 30,
+# with one additional legacy padding byte before the primary stats.
+_legacy_hero_pattern = (
+    HERO_REGEX.pattern
+    .replace(b"{30}", b"{29}", 1)
+    .replace(b".{26}", b".{27}", 1)
+    .replace(bytes([0x1D]), bytes([0x1C]))
+    .replace(b"{30}", b"{29}", 1)
+)
+LEGACY_HERO_REGEX = re.compile(_legacy_hero_pattern, HERO_REGEX.flags)
+
+
+def get_hero_regex(savefile):
+    """Return the hero layout matching the HotA version in this save."""
+    minor_offset = metadata.BYTE_POSITIONS["version_minor"]
+    minor_version = savefile.raw[minor_offset]
+    return HERO_REGEX if minor_version >= 10 else LEGACY_HERO_REGEX
+
 
 
 class DataClass(hero.DataClass):

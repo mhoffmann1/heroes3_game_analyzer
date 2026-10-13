@@ -67,7 +67,11 @@ def parse(hero_bytes, version):
     values = []
     for skill_name in metadata.Store.get("skills", version=version):
         skill_pos = IDS.get(skill_name)
-        level, slot = (hero_bytes[BYTEPOS[k] + skill_pos] for k in ("skills_level", "skills_slot"))
+        level_pos = BYTEPOS["skills_level"] + skill_pos
+        slot_pos = BYTEPOS["skills_slot"] + skill_pos
+        if max(level_pos, slot_pos) >= len(hero_bytes):
+            continue
+        level, slot = hero_bytes[level_pos], hero_bytes[slot_pos]
         if not level or not slot or slot > count:
             continue # for skill_name
         values.append({"name": skill_name, "level": LEVEL_ID_TO_NAME[level], "slot": slot})
