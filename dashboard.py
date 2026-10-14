@@ -128,6 +128,47 @@ def get_hero_army_achievement_metrics(hero_data):
     }
 
 
+def get_hero_artifact_achievement_metrics(hero_data):
+    """Calculate artifact achievement metrics for one hero snapshot."""
+    artifacts = hero_data.get("artifacts", {}) or {}
+    equipped = artifacts.get("equipped", {}) or {}
+    backpack = artifacts.get("backpack", []) or []
+    combined = artifacts.get("combined", []) or []
+    if not isinstance(equipped, dict):
+        equipped = {}
+    if not isinstance(backpack, list):
+        backpack = []
+    if not isinstance(combined, list):
+        combined = []
+
+    names = [name for name in [*equipped.values(), *backpack] if name]
+    scrolls = {
+        name for name in names
+        if isinstance(name, str) and name.startswith("Spell Scroll:")
+    }
+    combined_items = [item for item in combined if isinstance(item, dict)]
+    reserved_slots = sum(
+        max(0, len(item.get("occupied_slots", []) or []) - 1)
+        for item in combined_items
+    )
+    effective_equipment_slots = len([name for name in equipped.values() if name]) + reserved_slots
+    elemental_tomes = {
+        "Tome of Air", "Tome of Earth", "Tome of Fire", "Tome of Water",
+    }
+
+    return {
+        "artifact_count": len(names),
+        "artifact_names": list(dict.fromkeys(names)),
+        "backpack_artifact_count": len([name for name in backpack if name]),
+        "combined_artifact_count": len(combined_items),
+        "effective_equipment_slots": effective_equipment_slots,
+        "full_equipment": int(effective_equipment_slots >= 14),
+        "scroll_names": sorted(scrolls),
+        "distinct_scroll_count": len(scrolls),
+        "elemental_tomes": sorted(set(names) & elemental_tomes),
+    }
+
+
 def configure_homm3_plotly_theme():
     """Install the shared parchment-and-gold chart theme."""
     pio.templates["homm3"] = go.layout.Template(layout={
@@ -334,6 +375,7 @@ def parse_data(data):
     return df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turntime, df_utopias
 
 def create_hero_entry(hero_name, hero_data, player_color, day):
+    artifacts = hero_data.get("artifacts", {}) or {}
     hero = {
         "day": day,
         "player_color": player_color,
@@ -349,8 +391,12 @@ def create_hero_entry(hero_name, hero_data, player_color, day):
         "has_dd": hero_data.get("has_dd", False),
         "has_fly": hero_data.get("has_fly", False),
         "has_tp": hero_data.get("has_tp", False),
+        "equipped_artifacts": artifacts.get("equipped", {}) or {},
+        "backpack_artifacts": artifacts.get("backpack", []) or [],
+        "combined_artifacts": artifacts.get("combined", []) or [],
         }
     hero.update(get_hero_army_achievement_metrics(hero_data))
+    hero.update(get_hero_artifact_achievement_metrics(hero_data))
     return hero
 
 def sort_key(col):
@@ -505,6 +551,15 @@ def get_achievement_definitions(game_info=None):
         ("Master of the Adventure Map", "Gain all three adventure spells", "all_adventure_spells", 1, 3),
         ("Arcane Supremacy", "Have Town Portal, Fly, and Dimension Door on 3 different heroes", "distinct_spell_masters", 1, 3),
         ("Magical Dynasty", "Control 3 heroes that each know a major adventure spell", "major_spell_heroes", 3, 3),
+        ("Fully Equipped", "Fill all 14 equipment slots on one hero, including combination-artifact reservations", "full_equipment_heroes", 1, 4),
+        ("Pack Rat", "Carry at least 20 artifacts in one hero's backpack", "max_backpack_artifacts", 20, 1),
+        ("Treasure Hoard", "Control at least 50 artifacts across all heroes", "total_artifacts", 50, 2),
+        ("Matching Set", "Equip a combination artifact on one hero", "combination_heroes", 1, 2),
+        ("Greater Than the Sum", "Equip two combination artifacts on one hero", "max_combined_artifacts", 2, 4),
+        ("Curator", "Control at least 25 distinct artifact names", "distinct_artifacts", 25, 3),
+        ("Elemental Scholar", "Control the Tomes of Air, Earth, Fire, and Water simultaneously", "elemental_scholar", 1, 4),
+        ("Scroll Keeper", "Carry at least 5 distinct spell scrolls on one hero", "max_distinct_scrolls", 5, 2),
+        ("Arcane Library", "Control at least 10 distinct spell scrolls across all heroes", "distinct_scrolls", 10, 3),
         ("Heroic Entourage", "Control 8 heroes", "heroes_controlled", 8, 2),
         ("Nomad", "Reach 1,000,000 army strength while controlling at most one town", "nomad", 1, 1),
         ("Poor but Dangerous", "Lead army strength while holding the least gold", "poor_but_dangerous", 1, 3),
@@ -570,6 +625,8 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         "has_tier_seven", "largest_stack", "largest_tier_six_stack",
         "largest_tier_seven_stack", "tier_six_army_total", "mythical_host",
         "full_battle_line", "no_weaklings",
+        "artifact_count", "backpack_artifact_count", "combined_artifact_count",
+        "effective_equipment_slots", "full_equipment", "distinct_scroll_count",
     ]
     for column in hero_numeric_columns:
         if column not in heroes:
@@ -593,6 +650,7 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
     heroes["arcane_generals"] = (
         (heroes["army_strength"] >= 1_000_000) & (heroes["major_spell_count"] == 3)
     ).astype(int)
+    heroes["combination_hero"] = (heroes["combined_artifact_count"] >= 1).astype(int)
 
     hero_daily = heroes.groupby(["day", "player_color"]).agg(
         highest_hero_level=("level", "max"),
@@ -620,6 +678,12 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         mythical_host=("mythical_host", "max"),
         full_battle_line=("full_battle_line", "max"),
         no_weaklings=("no_weaklings", "max"),
+        full_equipment_heroes=("full_equipment", "sum"),
+        max_backpack_artifacts=("backpack_artifact_count", "max"),
+        total_artifacts=("artifact_count", "sum"),
+        combination_heroes=("combination_hero", "sum"),
+        max_combined_artifacts=("combined_artifact_count", "max"),
+        max_distinct_scrolls=("distinct_scroll_count", "max"),
     ).reset_index() if not heroes.empty else pd.DataFrame()
     distinct_spell_rows = []
     for (day, player), group in heroes.groupby(["day", "player_color"]):
@@ -643,6 +707,38 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
             on=["day", "player_color"],
             how="left",
         )
+    artifact_collection_rows = []
+    elemental_tomes = {
+        "Tome of Air", "Tome of Earth", "Tome of Fire", "Tome of Water",
+    }
+    for (day, player), group in heroes.groupby(["day", "player_color"]):
+        artifact_names = {
+            name
+            for values in group.get("artifact_names", pd.Series(dtype=object))
+            if isinstance(values, (list, tuple, set))
+            for name in values
+            if name
+        }
+        scroll_names = {
+            name
+            for values in group.get("scroll_names", pd.Series(dtype=object))
+            if isinstance(values, (list, tuple, set))
+            for name in values
+            if name
+        }
+        artifact_collection_rows.append({
+            "day": day,
+            "player_color": player,
+            "distinct_artifacts": len(artifact_names),
+            "distinct_scrolls": len(scroll_names),
+            "elemental_scholar": int(elemental_tomes.issubset(artifact_names)),
+        })
+    if not hero_daily.empty:
+        hero_daily = hero_daily.merge(
+            pd.DataFrame(artifact_collection_rows),
+            on=["day", "player_color"],
+            how="left",
+        )
     if not hero_daily.empty:
         players = players.merge(hero_daily, on=["day", "player_color"], how="left")
     hero_summary_columns = [
@@ -654,6 +750,9 @@ def build_achievement_awards(df_players, df_heroes, game_info=None):
         "has_tier_seven", "largest_stack", "largest_tier_six_stack",
         "largest_tier_seven_stack", "tier_six_army_total", "mythical_host",
         "full_battle_line", "no_weaklings",
+        "full_equipment_heroes", "max_backpack_artifacts", "total_artifacts",
+        "combination_heroes", "max_combined_artifacts", "distinct_artifacts",
+        "elemental_scholar", "max_distinct_scrolls", "distinct_scrolls",
     ]
     for column in hero_summary_columns:
         if column not in players:
@@ -1126,6 +1225,93 @@ def run_dashboard(
             "boxShadow": "0 2px 8px rgba(31, 45, 61, 0.07)",
         })
 
+    def hero_artifact_card(row):
+        equipped = row.get("equipped_artifacts", {})
+        backpack = row.get("backpack_artifacts", [])
+        combined = row.get("combined_artifacts", [])
+        if not isinstance(equipped, dict):
+            equipped = {}
+        if not isinstance(backpack, list):
+            backpack = []
+        if not isinstance(combined, list):
+            combined = []
+
+        combined_rows = [
+            html.Div([
+                html.Strong(item.get("name", "Unknown artifact")),
+                html.Span(
+                    "Occupies: " + ", ".join(
+                        slot.title() for slot in item.get("occupied_slots", [])
+                    ),
+                    style={"display": "block", "color": "#687386", "fontSize": "13px"},
+                ),
+            ], style={
+                "padding": "8px 10px",
+                "marginBottom": "6px",
+                "borderRadius": "8px",
+                "backgroundColor": "#fff6dc",
+                "border": "1px solid #e6c66a",
+            })
+            for item in combined
+            if isinstance(item, dict)
+        ]
+
+        equipment_rows = [
+            html.Div([
+                html.Span(
+                    slot.replace("left", "left ").replace("right", "right ").title(),
+                    style={"fontWeight": "700", "color": "#687386"},
+                ),
+                html.Span(artifact),
+            ], style={
+                "display": "grid",
+                "gridTemplateColumns": "100px 1fr",
+                "gap": "8px",
+                "padding": "3px 0",
+            })
+            for slot, artifact in equipped.items()
+        ]
+        backpack_items = [
+            html.Span(artifact, style={
+                "display": "inline-block",
+                "padding": "4px 8px",
+                "margin": "3px",
+                "borderRadius": "12px",
+                "backgroundColor": "#eef3f8",
+                "border": "1px solid #d8e0e8",
+            })
+            for artifact in backpack
+        ]
+
+        return html.Div([
+            html.H3(
+                f"{row['hero_name']} ({row['player_color']})",
+                style={"marginTop": "0", "marginBottom": "12px"},
+            ),
+            html.Div(
+                [
+                    html.Div(
+                        "Combined Artifacts",
+                        style={"fontWeight": "750", "marginBottom": "5px"},
+                    ),
+                    *combined_rows,
+                ] if combined_rows else [],
+            ),
+            html.Div("Equipped", style={"fontWeight": "750", "marginBottom": "5px"}),
+            html.Div(equipment_rows or [html.Em("None")]),
+            html.Div(
+                f"Backpack ({len(backpack)})",
+                style={"fontWeight": "750", "marginTop": "14px", "marginBottom": "5px"},
+            ),
+            html.Div(backpack_items or [html.Em("Empty")]),
+        ], style={
+            "padding": "16px",
+            "borderRadius": "11px",
+            "backgroundColor": "white",
+            "border": "1px solid #dfe6ee",
+            "boxShadow": "0 2px 8px rgba(31, 45, 61, 0.07)",
+        })
+
     primary_game_info_cards = [
         game_info_card(key, value)
         for key, value in game_info.items()
@@ -1279,6 +1465,44 @@ def run_dashboard(
         ], style={"width": "50%", "marginBottom": "30px"}),
 
         dcc.Graph(id="line_chart"),
+
+        html.Div([
+            html.H2("Hero Artifacts"),
+            html.P(
+                "Equipment and backpack contents for the selected heroes.",
+                style={"color": "#5f6b7a", "marginTop": "-8px"},
+            ),
+            html.Label("Select Players"),
+            dcc.Dropdown(
+                id="artifact_player_selector",
+                options=[{"label": p, "value": p} for p in player_options],
+                value=default_players,
+                multi=True,
+            ),
+            html.Label("Select Heroes"),
+            dcc.Dropdown(
+                id="artifact_hero_selector",
+                options=[{"label": h, "value": h} for h in hero_options],
+                value=default_heroes,
+                multi=True,
+            ),
+            html.Label("Select Day"),
+            dcc.Slider(
+                id="artifact_day_slider",
+                min=min(summary_days),
+                max=max(summary_days),
+                step=1,
+                value=max(summary_days),
+                marks={int(day): str(int(day)) for day in summary_days},
+                tooltip={"placement": "bottom", "always_visible": True},
+            ),
+            html.Div(id="hero_artifact_cards", style={
+                "display": "grid",
+                "gridTemplateColumns": "repeat(auto-fit, minmax(300px, 1fr))",
+                "gap": "12px",
+                "marginTop": "28px",
+            }),
+        ], style={"marginBottom": "30px"}),
 
         html.Hr(),
 
@@ -1567,6 +1791,23 @@ def run_dashboard(
         ]
         return options, retained_selection
 
+    @app.callback(
+        Output("artifact_hero_selector", "options"),
+        Output("artifact_hero_selector", "value"),
+        Input("artifact_player_selector", "value"),
+        State("artifact_hero_selector", "value"),
+    )
+    def update_artifact_hero_selector(selected_players, selected_heroes):
+        selected_players = selected_players or []
+        filtered = df_heroes[df_heroes["player_color"].isin(selected_players)]
+        heroes = sorted(filtered["hero_name"].dropna().unique())
+        options = [{"label": hero, "value": hero} for hero in heroes]
+        valid_heroes = set(heroes)
+        retained_selection = [
+            hero for hero in (selected_heroes or []) if hero in valid_heroes
+        ]
+        return options, retained_selection
+
     # Update line chart for heroes
     @app.callback(
         Output("line_chart", "figure"),
@@ -1612,6 +1853,25 @@ def run_dashboard(
             hovermode="closest"
         )
         return fig
+
+    @app.callback(
+        Output("hero_artifact_cards", "children"),
+        Input("artifact_player_selector", "value"),
+        Input("artifact_hero_selector", "value"),
+        Input("artifact_day_slider", "value"),
+    )
+    def update_hero_artifacts(selected_players, selected_heroes, selected_day):
+        if not selected_players or not selected_heroes:
+            return [html.Em("Select at least one player and hero above.")]
+
+        filtered = df_heroes[
+            (df_heroes["day"] == selected_day)
+            & (df_heroes["player_color"].isin(selected_players))
+            & (df_heroes["hero_name"].isin(selected_heroes))
+        ].sort_values(["player_color", "hero_name"])
+        if filtered.empty:
+            return [html.Em("No selected heroes are available on this day.")]
+        return [hero_artifact_card(row) for _, row in filtered.iterrows()]
 
     # Heroes army level progression
 

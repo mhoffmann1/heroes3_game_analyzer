@@ -1,4 +1,5 @@
 import argparse
+import copy
 import datetime
 import json
 import logging
@@ -23,7 +24,7 @@ logger = logging.getLogger('h3_analyzer')
 
 PLAYER_COLORS = ['Red', 'Blue', 'Tan', 'Green', 'Orange', 'Purple', 'Teal', 'Pink']
 MAX_OBELISKS = 48
-OBELISK_TRAILING_SIGNATURE = bytes.fromhex("000300000000ff03ff3fff")
+OBELISK_TRAILING_SIGNATURE = bytes.fromhex("000300000000ff03ff3f")
 MINE_RECORD_SIZE = 62
 MINE_RECORD_BODY = (b"\xff" * 28) + (b"\x00" * 28)
 MINE_TYPES = [
@@ -35,7 +36,7 @@ MINE_TYPES = [
     "gem_ponds",
     "gold_mines",
 ]
-INCREMENTAL_CACHE_VERSION = 3
+INCREMENTAL_CACHE_VERSION = 5
 INCREMENTAL_CACHE_FILENAME = ".incremental_state.json"
 
 
@@ -55,9 +56,11 @@ def extract_obelisk_data(raw):
 
     # Native HoTA stores one total-count byte followed by a fixed 48-byte
     # Obelisk visit-mask array. Each mask uses one bit per player color. The
-    # A signature 13 bytes after that array is stable across the older layout
+    # A signature prefix 13 bytes after that array is stable across the older layout
     # and HoTA 1.8.0. Bytes immediately after the array are intentionally not
-    # checked because their layout changed in HoTA 1.8.0.
+    # checked because their layout changed in HoTA 1.8.0. The byte immediately
+    # after this prefix is stateful (observed changing from FF to 07, 06, and 00),
+    # so it must not be part of the signature.
     signature_offset = 1 + MAX_OBELISKS + 13
     candidate_size = signature_offset + len(OBELISK_TRAILING_SIGNATURE)
     for offset in range(len(raw) - candidate_size + 1):
@@ -112,6 +115,55 @@ def extract_obelisk_data(raw):
         "visited_by_player": visited_by_player,
         "objects": objects,
     }
+
+
+def reconcile_obelisk_data(current, previous_state):
+    """Preserve cumulative Obelisk visits across transient extraction failures."""
+    previous = previous_state if isinstance(previous_state, dict) else {}
+    current_valid = current.get("table_offset") is not None
+    previous_valid = previous.get("table_offset") is not None
+
+    if not current_valid:
+        if not previous_valid:
+            current["source"] = "unavailable"
+            return current
+        carried = copy.deepcopy(previous)
+        carried["last_valid_table_offset"] = carried.get("table_offset")
+        carried["table_offset"] = None
+        carried["source"] = "previous_save"
+        logger.warning(
+            "Obelisk table is unavailable in the current save; preserving the "
+            "last valid cumulative counts: %s.",
+            carried.get("visited_by_player", {}),
+        )
+        return carried
+
+    if previous_valid and previous.get("total") == current.get("total"):
+        previous_masks = {
+            item.get("index"): int(item.get("visited_mask", 0) or 0)
+            for item in previous.get("objects", [])
+        }
+        for item in current.get("objects", []):
+            item["visited_mask"] = int(item.get("visited_mask", 0) or 0) | previous_masks.get(
+                item.get("index"), 0
+            )
+            item["visited_by"] = [
+                color
+                for player_index, color in enumerate(PLAYER_COLORS)
+                if item["visited_mask"] & (1 << player_index)
+            ]
+        current["visited_by_player"] = {
+            color: sum(
+                bool(item["visited_mask"] & (1 << player_index))
+                for item in current.get("objects", [])
+            )
+            for player_index, color in enumerate(PLAYER_COLORS)
+        }
+
+    current["source"] = "current_save"
+    previous_state.clear()
+    previous_state.update(copy.deepcopy(current))
+    return current
 
 
 def _empty_mine_counts():
@@ -410,7 +462,36 @@ def add_army_unit_levels(army, unit_stats):
         for unit in army
     ]
 
-def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
+
+def extract_hero_artifacts(hero):
+    """Return a JSON-safe snapshot of a hero's worn and backpack artifacts."""
+    equipment = getattr(hero, "equipment", {}) or {}
+    inventory = getattr(hero, "inventory", []) or []
+    artifact_slots = metadata.Store.get(
+        "artifact_slots", version=getattr(hero, "version", None)
+    )
+    combined = [
+        {
+            "name": artifact,
+            "primary_slot": location,
+            "occupied_slots": list(artifact_slots.get(artifact, [])),
+        }
+        for location, artifact in equipment.items()
+        if artifact and len(artifact_slots.get(artifact, [])) > 1
+    ]
+    return {
+        "equipped": {
+            slot: artifact
+            for slot, artifact in equipment.items()
+            if artifact
+        },
+        "backpack": [artifact for artifact in inventory if artifact],
+        "combined": combined,
+    }
+
+def extract_game_data(
+    save, ai_values, unit_stats, dragon_utopia_state, obelisk_state=None
+):
     """Extract stats for all heroes and towns in the savegame."""
     heroes = []
     utopias_summary = []
@@ -470,6 +551,7 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
                     "army_strength": army_strength,
                     "army_hitpoints": army_hitpoints,
                     "army_levels": army_levels,
+                    "artifacts": extract_hero_artifacts(hero),
                     "spells": list(spells),
                     "artifact_spells": list(artifact_spells),
                     "has_dd": spell_known("Dimension Door", spells) or spell_known("Dimension Door", artifact_spells),
@@ -498,6 +580,8 @@ def extract_game_data(save, ai_values, unit_stats, dragon_utopia_state):
     #logger.debug("Retrieved %d towns from save.towns: %s", len(towns), [t["name"] for t in towns])
     game_info = parse_game_info(mapdata, towns)
     obelisk_data = extract_obelisk_data(getattr(save, "raw", b""))
+    if obelisk_state is not None:
+        obelisk_data = reconcile_obelisk_data(obelisk_data, obelisk_state)
     game_info["total_obelisks"] = obelisk_data["total"]
     mine_data = extract_mine_data(
         getattr(save, "raw", b""),
@@ -988,6 +1072,7 @@ def main():
     #logger = logging.getLogger(__name__)
 
     utopia_tracker = UtopiaTracker()
+    obelisk_state = {}
 
     try:
         # Load AI unit values
@@ -1010,7 +1095,15 @@ def main():
         if os.path.isfile(input_path):
             # Single file mode
             logger.info(f"Processing single savegame: {input_path}")
-            raw_data, player_data = process_file(input_path, ai_values, unit_stats, dragon_utopia_state, args.output, utopia_tracker)
+            raw_data, player_data = process_file(
+                input_path,
+                ai_values,
+                unit_stats,
+                dragon_utopia_state,
+                args.output,
+                utopia_tracker,
+                obelisk_state=obelisk_state,
+            )
 
             # Save raw data
             save_to_json(raw_data, args.output)
@@ -1052,6 +1145,7 @@ def main():
                 isinstance(cached_manifest, dict)
                 and isinstance(cached_manifest.get("utopia_state"), list)
                 and isinstance(cached_manifest.get("utopia_counts"), dict)
+                and isinstance(cached_manifest.get("obelisk_state"), dict)
             )
             if (
                 cache_has_runtime_state
@@ -1079,6 +1173,7 @@ def main():
                 dragon_utopia_state.extend(
                     restore_utopia_state(cached_manifest["utopia_state"])
                 )
+                obelisk_state.update(cached_manifest["obelisk_state"])
                 last_save_ctime = os.path.getctime(
                     os.path.join(input_path, files[reusable_count - 1])
                 )
@@ -1117,7 +1212,8 @@ def main():
                         dragon_utopia_state,
                         os.path.join(args.output, filename + ".json"),
                         utopia_tracker,
-                        save_individual=False                      
+                        save_individual=False,
+                        obelisk_state=obelisk_state,
                     )
 
                     # Get file creation timestamp 
@@ -1162,6 +1258,7 @@ def main():
                     dragon_utopia_state
                 )
                 current_manifest["utopia_counts"] = utopia_tracker.as_dict()
+                current_manifest["obelisk_state"] = obelisk_state
                 save_to_json(current_manifest, cache_output)
                 logger.info(
                     "Incremental cache saved; future appended turns will skip old saves."
@@ -1176,11 +1273,26 @@ def main():
         sys.exit(1)
 
 
-def process_file(filepath, ai_values, unit_stats, dragon_utopia_state, output_file, utopia_tracker, save_individual=True):
+def process_file(
+    filepath,
+    ai_values,
+    unit_stats,
+    dragon_utopia_state,
+    output_file,
+    utopia_tracker,
+    save_individual=True,
+    obelisk_state=None,
+):
     logger.debug(f"Loading save: {filepath}")
     save = load_savegame(filepath)
     logger.debug(f"Extracting game data...")
-    raw_data, tracker_update = extract_game_data(save, ai_values, unit_stats, dragon_utopia_state)
+    raw_data, tracker_update = extract_game_data(
+        save,
+        ai_values,
+        unit_stats,
+        dragon_utopia_state,
+        obelisk_state=obelisk_state,
+    )
     utopia_tracker.merge(tracker_update)
     player_data = aggregate_player_data(raw_data, utopia_tracker)
 

@@ -267,14 +267,18 @@ def _find_source_hero_object_id(save, hero_span: HeroSpan) -> int:
             f"coordinates are ({x},{y},{z})."
         )
 
-    # HoTA's hero record stores the visible position two tiles to the right of
-    # the adventure-map object anchor. Check that confirmed layout first. The
-    # remaining positions preserve compatibility with saves using the older
-    # one-tile or same-tile layouts.
+    # Native HoTA saves can store the hero's visitable position up to four
+    # tiles to the right of the adventure-map object's sprite anchor. Check
+    # the widest confirmed layout first, then retain the shorter layouts used
+    # by older saves and saves produced by this tool.
     candidates = (
+        (x - 4, y),
+        (x - 3, y),
         (x - 2, y),
         (x - 1, y),
         (x, y),
+        (x - 4, y - 1),
+        (x - 3, y - 1),
         (x - 2, y - 1),
         (x - 1, y - 1),
         (x, y - 1),

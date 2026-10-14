@@ -15,6 +15,33 @@ def empty_tile():
 
 
 class SwapHeroMapObjectTests(unittest.TestCase):
+    def test_prefers_native_hota_hero_object_four_tiles_left_of_position(self):
+        raw = bytearray(80)
+        span = HeroSpan("Solmyr", 0, 80)
+        raw[5:7] = (6).to_bytes(2, "big")
+        raw[7:9] = (1).to_bytes(2, "big")
+        raw[9:11] = (0).to_bytes(2, "big")
+
+        tiles = [(0, empty_tile(), 22) for _ in range(8 * 8)]
+        hero_tile = bytearray(empty_tile())
+        hero_tile[7] |= 0x10
+        hero_tile[8] = 0x22
+        hero_tile[14:18] = (45).to_bytes(4, "little")
+        tiles[1 * 8 + 2] = (0, bytes(hero_tile), 22)
+
+        nearer_hero = bytearray(empty_tile())
+        nearer_hero[7] |= 0x10
+        nearer_hero[8] = 0x22
+        nearer_hero[14:18] = (99).to_bytes(4, "little")
+        tiles[1 * 8 + 4] = (0, bytes(nearer_hero), 22)
+        save = SimpleNamespace(
+            raw=raw,
+            mapdata={"size": 8, "levels": 1},
+            maptiles=tiles,
+        )
+
+        self.assertEqual(45, _find_source_hero_object_id(save, span))
+
     def test_prefers_hota_hero_object_two_tiles_left_of_position(self):
         raw = bytearray(80)
         span = HeroSpan("Sylvia", 0, 80)
