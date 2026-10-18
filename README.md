@@ -48,6 +48,14 @@ After processing, the launcher restarts the dashboard and open dashboard tabs
 reload automatically. Use **Stop** or close the GUI to stop both monitoring and
 the dashboard server.
 
+Enable **Show Fog of War Exploration** in the dashboard to draw terrain, roads,
+rivers, and static obstacles from the matching `.h3m` map and installed game
+assets. Choose a player and day to see only the area explored by that player
+on that day. Drag to pan and scroll to zoom. When a matching map or assets are
+unavailable, the view falls back to its colored exploration grid. The
+terrain and scenery come from the original map, so changes to map objects
+during play may not appear. The standalone Map Helper remains a separate app.
+
 To decompress single save for manual analysys:
 
 ```bash
@@ -73,6 +81,28 @@ To run dashboard:
 python3.10 dashboard.py processed_games/Addy_Marcin_kerbos/
 
 ```
+
+### Map Helper
+
+Map Helper is a standalone browser app that shows one player's explored map
+from a processed game. It no longer appears in the dashboard. Start it from
+the repository root:
+
+```bash
+venv_heroes/bin/python map_helper_app.py "processed_games/YOUR_GAME" --player Blue
+```
+
+Open <http://127.0.0.1:8051/>. The `--player` option is required and stays
+fixed until you restart the app. Map Helper checks processed data every five
+seconds; keep the launcher's save monitoring enabled for live updates. A
+matching original map and local game assets enable terrain graphics and
+automatic pins for transports, stat and morale/luck sites, and Dragon Utopias.
+Town pins come from processed saves. Covered tiles stay hidden.
+
+See the [Map Helper user guide](docs/map_helper.md) for setup, map controls,
+adding and editing pins, automatic categories, startup options, and
+troubleshooting. The [graphics feasibility notes](docs/map_graphics_feasibility.md)
+describe how the map renderer works and its current limits.
 
 ## Transfer heroes between save files
 

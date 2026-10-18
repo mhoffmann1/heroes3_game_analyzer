@@ -3,5 +3,6 @@ dash==3.1.0
 numpy==2.2.6
 pandas==2.3.0
 plotly==6.2.0
+Pillow==12.3.0
 PyYAML==6.0.2
 tqdm==4.67.1

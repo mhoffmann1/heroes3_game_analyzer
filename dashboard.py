@@ -16,6 +16,8 @@ import plotly.io as pio
 from dash import State, dcc, html
 from dash.dependencies import Input, Output
 from plotly.subplots import make_subplots
+from fog_of_war import fog_of_war_figure
+from game_graphics import load_terrain_renderer
 
 logger = logging.getLogger(__package__)
 
@@ -1139,11 +1141,22 @@ def run_dashboard(
     df_utopias,
     port,
     live_reload=False,
+    input_dir=None,
 ):
     configure_homm3_plotly_theme()
     app = dash.Dash(__name__)
     server = app.server
     dashboard_version = uuid.uuid4().hex
+    terrain_renderer = None
+    terrain_status = "Exploration grid: processed game directory unavailable."
+    if input_dir and game_info.get("map_size"):
+        terrain_renderer, source = load_terrain_renderer(
+            input_dir, int(game_info["map_size"]), int(game_info.get("levels") or 1)
+        )
+        terrain_status = (
+            f"Terrain graphics: {os.path.basename(source)}" if terrain_renderer else
+            f"Exploration grid: {source}"
+        )
 
     if live_reload:
         @server.get("/_h3_dashboard_version")
@@ -1654,6 +1667,7 @@ def run_dashboard(
                 style={"marginBottom": "10px", "fontWeight": "600"},
             ),
             html.Div([
+                html.Div(terrain_status, style={"fontSize": "13px", "marginBottom": "8px"}),
                 html.Label("Select Player"),
                 dcc.Dropdown(
                     id="fog_player_selector",
@@ -1671,6 +1685,7 @@ def run_dashboard(
                 ], style={"margin": "10px 0"}),
                 dcc.Graph(
                     id="fog_of_war_map",
+                    config={"scrollZoom": True, "displayModeBar": True},
                     style={
                         "width": "1000px",
                         "maxWidth": "100%",
@@ -2663,151 +2678,22 @@ def run_dashboard(
     def update_fog_map(player_color, selected_day, visibility):
         if "show" not in (visibility or []) or not player_color or selected_day is None:
             return go.Figure()
-
-        row = df_players[
+        rows = df_players[
             (df_players["player_color"] == player_color) &
             (df_players["day"] == selected_day)
-        ].squeeze()
-
-        #print(f"simplified towns: {row.get('town_summary')}")
-        player_town_list = row.get("town_summary")
-
-        fog = row.get("fog_of_war")
-        if not fog:
+        ]
+        if rows.empty:
             return go.Figure()
-        fog_checksum = sum((index + 1) * int(value) for index, value in enumerate(fog))
-        visibility_offset = game_info.get("map_visibility_offset", "unknown")
-
-        map_size = game_info.get("map_size", 36)
-        levels = game_info.get("levels", 1)
-
-        tiles_per_level = map_size * map_size
-        level_maps = []
-        for level in range(levels):
-            offset = level * tiles_per_level
-            level_fog = fog[offset:offset + tiles_per_level]
-            grid = np.array([int(c) for c in level_fog]).reshape((map_size, map_size))
-            level_maps.append(grid)
-
-        player_rgb = PLAYER_COLORS.get(player_color, "#999999")
-        marker_color = get_contrasting_color(player_rgb)
-        player_rgb_array = tuple(int(player_rgb.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
-
-        data = []
-        annotations = []
-        x_offset = 0
-        scale_factor = 4  # Bigger images
-
-        for i, level_grid in enumerate(level_maps):
-            rgb_image = np.zeros((map_size, map_size, 3), dtype=np.uint8)
-            for y in range(map_size):
-                for x in range(map_size):
-                    if level_grid[y, x] == 1:
-                        rgb_image[y, x] = player_rgb_array
-                    else:
-                        rgb_image[y, x] = (200, 200, 200)
-
-            # Scale bitmap
-            rgb_image_large = np.repeat(
-                np.repeat(rgb_image, scale_factor, axis=0),
-                scale_factor,
-                axis=1
-            )
-
-            # Add image
-            data.append(go.Image(z=rgb_image_large, x0=x_offset, y0=0))
-
-            # Add Utopia markers for this level (APPEND TO annotations)
-            level_utopias = df_utopias[df_utopias["underground"] == (i == 1)]
-
-            for _, utop in level_utopias.iterrows():
-                ux = utop["X"]
-                uy = utop["Y"]
-
-                if not (0 <= ux < map_size and 0 <= uy < map_size):
-                    continue
-
-                # Only mark if explored
-                if level_grid[uy, ux] == 1:
-                    plot_x = x_offset + (ux * scale_factor) + scale_factor / 2
-                    plot_y = (uy * scale_factor) + scale_factor / 2
-
-                    annotations.append(dict(
-                        x=plot_x,
-                        y=plot_y,
-                        text="X",
-                        showarrow=False,
-                        font=dict(size=18, color=marker_color, family="Arial Black"),
-                        xanchor="center",
-                        yanchor="middle"
-                    ))
-
-            #Add town markers for this level ===
-            for town in player_town_list:
-                tx, ty, tlevel_str = town["coords"]
-                tlevel = 0 if tlevel_str == "Surface" else 1
-
-                if tlevel != i:
-                    continue
-                
-                if not (0 <= tx < map_size and 0 <= ty < map_size):
-                    continue
-
-                if level_grid[ty, tx] == 1:
-                    plot_x = x_offset + (tx * scale_factor) + scale_factor / 2
-                    plot_y = (ty * scale_factor) + scale_factor / 2
-
-                    annotations.append(dict(
-                        x=plot_x,
-                        y=plot_y,
-                        text="■",
-                        showarrow=False,
-                        font=dict(size=18, color=marker_color, family="Arial Black"),
-                        xanchor="center",
-                        yanchor="middle"
-                    ))
-
-
-            # Add label above image
-            title = "Ground" if i == 0 else "Underground"
-            annotations.append(dict(
-                x=x_offset + rgb_image_large.shape[1] / 2,
-                y=-15,
-                text=title,
-                showarrow=False,
-                font=dict(size=16, color="black"),
-                xanchor="center",
-                yanchor="bottom"
-            ))
-
-            # Move for next level (side-by-side)
-            x_offset += rgb_image_large.shape[1] + 20
-
-        # === Build figure AFTER all annotations collected ===
-        fig = go.Figure(data=data)
-        fig.update_layout(
-            title=f"Fog of War - {player_color} - Day {selected_day} "
-                  f"(map size: {map_size}, visibility offset: {visibility_offset}, "
-                  f"fog checksum: {fog_checksum})",
-            yaxis=dict(scaleanchor="x", autorange="reversed", visible=False),
-            xaxis=dict(visible=False),
-            annotations=annotations,
-            margin=dict(t=50, l=0, r=0, b=0),
-            width=1000,
-            height=800
+        row = rows.iloc[-1]
+        return fog_of_war_figure(
+            player_color, selected_day, row.get("fog_of_war"),
+            row.get("town_summary"), df_utopias,
+            game_info.get("map_size") or 36, game_info.get("levels") or 1,
+            PLAYER_COLORS.get(player_color, "#999999"),
+            game_info.get("map_visibility_offset", "unknown"), terrain_renderer,
         )
 
-        return fig
-
-
     app.run(debug=not live_reload, use_reloader=False, port=port)
-
-def get_contrasting_color(hex_color):
-    """Return black or white depending on contrast."""
-    rgb = tuple(int(hex_color.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
-    # Compute luminance
-    luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2])
-    return "white" if luminance < 140 else "black"
 
 def main():
     parser = argparse.ArgumentParser(description="Heroes 3 Savegame Dashboard")
@@ -2841,6 +2727,7 @@ def main():
         df_utopias,
         args.port,
         live_reload=args.live_reload,
+        input_dir=args.input_dir,
     )
 
 
