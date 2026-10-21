@@ -79,7 +79,6 @@ class AnalyzerLauncher:
         self.dirty = False
         self.changed_at = 0.0
         self.last_signature: tuple[tuple[str, int, int], ...] = ()
-        self.dashboard_opened = False
 
         self.path_var = tk.StringVar(value=default_savegame_directory())
         self.output_var = tk.StringVar(value="live_game")
@@ -210,7 +209,6 @@ class AnalyzerLauncher:
         self.last_signature = save_directory_signature(self.directory)
         self.monitoring = self.live_var.get()
         self.dirty = False
-        self.dashboard_opened = False
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self._append_log(f"Watching: {self.directory}\n")
@@ -317,7 +315,7 @@ class AnalyzerLauncher:
                 break
             try:
                 with urllib.request.urlopen(url, timeout=0.5):
-                    self.events.put(("dashboard_ready", url))
+                    self.events.put(("dashboard_ready",))
                     return
             except Exception:
                 time.sleep(0.25)
@@ -330,7 +328,6 @@ class AnalyzerLauncher:
 
     def open_dashboard(self) -> None:
         webbrowser.open(self.dashboard_url)
-        self.dashboard_opened = True
 
     def _poll_directory(self) -> None:
         if self.monitoring:
@@ -372,9 +369,6 @@ class AnalyzerLauncher:
                     "Dashboard is running"
                     + (" and monitoring saves." if self.monitoring else ".")
                 )
-                if not self.dashboard_opened:
-                    webbrowser.open(event[1])
-                    self.dashboard_opened = True
             elif kind == "dashboard_failed":
                 if self.active:
                     self.status_var.set("Dashboard did not become ready. See the log.")

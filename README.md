@@ -42,10 +42,11 @@ In the launcher:
 3. Leave **Monitor for new or changed save files** enabled for live play.
 4. Click **Process and start dashboard**.
 
-The launcher processes the existing saves, starts the dashboard, and opens it in
-the default browser. While monitoring is enabled, it detects new or overwritten
-turn saves and waits briefly for Heroes III to finish writing the file. Newly
-appended turns are processed incrementally: unchanged historical saves are read
+The launcher processes the existing saves and starts the dashboard. Click
+**Open dashboard** when you want to view it in your browser. While monitoring
+is enabled, the launcher detects new or overwritten turn saves and waits briefly
+for Heroes III to finish writing the file. Newly appended turns are processed
+incrementally: unchanged historical saves are read
 from the cache and only the new save is parsed. If an older save is overwritten,
 removed, or inserted out of order, the analyzer automatically performs a safe
 full rebuild. The first run after upgrading from an older analyzer version also
