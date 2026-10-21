@@ -1,8 +1,15 @@
+import queue
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
-from launcher import default_output_name, save_directory_signature, valid_output_name
+from launcher import (
+    AnalyzerLauncher,
+    default_output_name,
+    save_directory_signature,
+    valid_output_name,
+)
 
 
 class LauncherHelpersTests(unittest.TestCase):
@@ -27,6 +34,21 @@ class LauncherHelpersTests(unittest.TestCase):
 
     def test_default_output_name_replaces_path_punctuation(self):
         self.assertEqual("game_ one", default_output_name(Path("game: one")))
+
+    def test_dashboard_ready_does_not_open_browser(self):
+        launcher = AnalyzerLauncher.__new__(AnalyzerLauncher)
+        launcher.active = True
+        launcher.monitoring = False
+        launcher.events = queue.Queue()
+        launcher.events.put(("dashboard_ready",))
+        launcher.status_var = Mock()
+        launcher.root = Mock()
+
+        with patch("launcher.webbrowser.open") as open_browser:
+            launcher._drain_events()
+
+        open_browser.assert_not_called()
+        launcher.status_var.set.assert_called_once_with("Dashboard is running.")
 
 
 if __name__ == "__main__":
