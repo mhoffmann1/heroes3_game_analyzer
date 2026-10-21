@@ -166,8 +166,17 @@ def grouped_pin_list(pins):
     sections = []
     # Keep older manually saved Town pins accessible for review and deletion.
     for category in CATEGORY_COLORS:
-        group = sorted((p for p in pins if p.get("category") == category),
-                       key=lambda p: (p["level"], p["title"].casefold()))
+        def pin_sort_key(pin):
+            title = pin["title"].casefold()
+            if category == "Portal":
+                return (title.partition(" ")[0], pin["level"], title,
+                        pin["y"], pin["x"])
+            return pin["level"], title
+
+        group = sorted(
+            (p for p in pins if p.get("category") == category),
+            key=pin_sort_key,
+        )
         if not group:
             continue
         color = CATEGORY_COLORS[category]
@@ -340,7 +349,8 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
             ], style={"flex": "1 1 720px", "minWidth": "360px"}),
             html.Div([
                 html.H3("Pins"),
-                html.Div(id="map_pin_list", style={"maxHeight": "300px", "overflowY": "auto"}),
+                html.Div(id="map_pin_list", style={"maxHeight": "min(65vh, 800px)",
+                                                   "overflowY": "auto"}),
                 html.Hr(),
                 html.Div("Click an explored tile or choose a pin.", id="map_coordinates"),
                 html.Label("Title"), dcc.Input(id="map_title", type="text", maxLength=100,

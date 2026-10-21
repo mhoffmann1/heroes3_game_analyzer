@@ -1481,40 +1481,48 @@ def run_dashboard(
 
         html.Div([
             html.H2("Hero Artifacts"),
-            html.P(
-                "Equipment and backpack contents for the selected heroes.",
-                style={"color": "#5f6b7a", "marginTop": "-8px"},
+            dcc.Checklist(
+                id="toggle_hero_artifacts",
+                options=[{"label": "Show Hero Artifacts", "value": "show"}],
+                value=[],
+                style={"marginBottom": "10px", "fontWeight": "600"},
             ),
-            html.Label("Select Players"),
-            dcc.Dropdown(
-                id="artifact_player_selector",
-                options=[{"label": p, "value": p} for p in player_options],
-                value=default_players,
-                multi=True,
-            ),
-            html.Label("Select Heroes"),
-            dcc.Dropdown(
-                id="artifact_hero_selector",
-                options=[{"label": h, "value": h} for h in hero_options],
-                value=default_heroes,
-                multi=True,
-            ),
-            html.Label("Select Day"),
-            dcc.Slider(
-                id="artifact_day_slider",
-                min=min(summary_days),
-                max=max(summary_days),
-                step=1,
-                value=max(summary_days),
-                marks={int(day): str(int(day)) for day in summary_days},
-                tooltip={"placement": "bottom", "always_visible": True},
-            ),
-            html.Div(id="hero_artifact_cards", style={
-                "display": "grid",
-                "gridTemplateColumns": "repeat(auto-fit, minmax(300px, 1fr))",
-                "gap": "12px",
-                "marginTop": "28px",
-            }),
+            html.Div([
+                html.P(
+                    "Equipment and backpack contents for the selected heroes.",
+                    style={"color": "#5f6b7a", "marginTop": "-8px"},
+                ),
+                html.Label("Select Players"),
+                dcc.Dropdown(
+                    id="artifact_player_selector",
+                    options=[{"label": p, "value": p} for p in player_options],
+                    value=default_players,
+                    multi=True,
+                ),
+                html.Label("Select Heroes"),
+                dcc.Dropdown(
+                    id="artifact_hero_selector",
+                    options=[{"label": h, "value": h} for h in hero_options],
+                    value=default_heroes,
+                    multi=True,
+                ),
+                html.Label("Select Day"),
+                dcc.Slider(
+                    id="artifact_day_slider",
+                    min=min(summary_days),
+                    max=max(summary_days),
+                    step=1,
+                    value=max(summary_days),
+                    marks={int(day): str(int(day)) for day in summary_days},
+                    tooltip={"placement": "bottom", "always_visible": True},
+                ),
+                html.Div(id="hero_artifact_cards", style={
+                    "display": "grid",
+                    "gridTemplateColumns": "repeat(auto-fit, minmax(300px, 1fr))",
+                    "gap": "12px",
+                    "marginTop": "28px",
+                }),
+            ], id="hero_artifacts_container", style={"display": "none"}),
         ], style={"marginBottom": "30px"}),
 
         html.Hr(),
@@ -1681,7 +1689,8 @@ def run_dashboard(
                 html.Div([
                     html.Button("Play", id="fog_play_btn", n_clicks=0),
                     html.Button("Pause", id="fog_pause_btn", n_clicks=0),
-                    dcc.Interval(id="fog_anim_interval", interval=800, n_intervals=0, disabled=True)
+                    html.Span("1.5 seconds per turn", style={"marginLeft": "10px"}),
+                    dcc.Interval(id="fog_anim_interval", interval=1500, n_intervals=0, disabled=True)
                 ], style={"margin": "10px 0"}),
                 dcc.Graph(
                     id="fog_of_war_map",
@@ -1779,6 +1788,13 @@ def run_dashboard(
         Input("toggle_utopia_visitation", "value"),
     )
     def toggle_utopia_visitation(value):
+        return {"display": "block" if "show" in (value or []) else "none"}
+
+    @app.callback(
+        Output("hero_artifacts_container", "style"),
+        Input("toggle_hero_artifacts", "value"),
+    )
+    def toggle_hero_artifacts(value):
         return {"display": "block" if "show" in (value or []) else "none"}
 
     @app.callback(

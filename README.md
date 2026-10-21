@@ -51,10 +51,11 @@ the dashboard server.
 Enable **Show Fog of War Exploration** in the dashboard to draw terrain, roads,
 rivers, and static obstacles from the matching `.h3m` map and installed game
 assets. Choose a player and day to see only the area explored by that player
-on that day. Drag to pan and scroll to zoom. When a matching map or assets are
-unavailable, the view falls back to its colored exploration grid. The
-terrain and scenery come from the original map, so changes to map objects
-during play may not appear. The standalone Map Helper remains a separate app.
+on that day. Drag to pan and scroll to zoom. Autoplay advances one day every
+1.5 seconds. When a matching map or assets are unavailable, the view falls back
+to its colored exploration grid. The terrain and scenery come from the original
+map, so changes to map objects during play may not appear. The standalone Map
+Helper remains a separate app.
 
 To decompress single save for manual analysys:
 
@@ -93,8 +94,11 @@ venv_heroes/bin/python map_helper_app.py "processed_games/YOUR_GAME" --player Bl
 ```
 
 Open <http://127.0.0.1:8051/>. The `--player` option is required and stays
-fixed until you restart the app. Map Helper checks processed data every five
-seconds; keep the launcher's save monitoring enabled for live updates. A
+fixed until you restart the app. For automatic updates, keep `launcher.py`
+running in the background with **Monitor for new or changed save files** enabled
+and pointed at the **raw savegame directory**. The launcher processes each new
+save into `processed_games/YOUR_GAME`; Map Helper checks that processed data
+every five seconds. Running Map Helper alone does not process new saves. A
 matching original map and local game assets enable terrain graphics and
 automatic pins for transports, stat and morale/luck sites, and Dragon Utopias.
 Town pins come from processed saves. Covered tiles stay hidden.

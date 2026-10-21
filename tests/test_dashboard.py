@@ -1,7 +1,9 @@
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
+import dashboard
 from dashboard import (
     build_achievement_awards,
     build_player_army_composition,
@@ -12,6 +14,42 @@ from dashboard import (
     get_achievement_definitions,
     get_top_heroes_by_army_strength,
 )
+
+
+class HeroArtifactsToggleTests(unittest.TestCase):
+    def test_artifacts_start_hidden_and_toggle_open(self):
+        captured = {}
+
+        def capture_run(app, **kwargs):
+            captured["app"] = app
+
+        heroes = pd.DataFrame(columns=["player_color", "hero_name", "army_strength", "day"])
+        players = pd.DataFrame([{"player_color": "Red", "day": 1}])
+        with patch.object(dashboard.dash.Dash, "run", capture_run):
+            dashboard.run_dashboard(
+                heroes, pd.DataFrame([{"Day": 1}]), pd.DataFrame(),
+                players, pd.DataFrame(), {}, pd.DataFrame(), 8050,
+            )
+
+        def find_component(component, component_id):
+            if getattr(component, "id", None) == component_id:
+                return component
+            children = getattr(component, "children", None)
+            if not isinstance(children, (list, tuple)):
+                children = [children] if children is not None else []
+            for child in children:
+                found = find_component(child, component_id)
+                if found is not None:
+                    return found
+            return None
+
+        app = captured["app"]
+        self.assertEqual(find_component(app.layout, "toggle_hero_artifacts").value, [])
+        self.assertEqual(find_component(app.layout, "hero_artifacts_container").style,
+                         {"display": "none"})
+        callback = app.callback_map["hero_artifacts_container.style"]["callback"].__wrapped__
+        self.assertEqual(callback(["show"]), {"display": "block"})
+        self.assertEqual(callback([]), {"display": "none"})
 
 
 class PlayerArmyCompositionTests(unittest.TestCase):

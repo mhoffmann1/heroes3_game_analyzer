@@ -86,6 +86,23 @@ class MapHelperTests(unittest.TestCase):
         self.assertEqual(groups[0].children[1].children[0].children,
                          "Blue portal - Surface (1/0)")
 
+    def test_portals_are_grouped_by_color_across_levels(self):
+        pins = [
+            {"id": "yellow-underground", "category": "Portal", "level": 1,
+             "title": "Yellow Two-way Monolith", "x": 4, "y": 5},
+            {"id": "blue-surface", "category": "Portal", "level": 0,
+             "title": "Blue One-way entrance Portal", "x": 2, "y": 3},
+            {"id": "yellow-surface", "category": "Portal", "level": 0,
+             "title": "Yellow One-way exit Portal", "x": 6, "y": 7},
+            {"id": "blue-underground", "category": "Portal", "level": 1,
+             "title": "Blue Two-way Monolith", "x": 8, "y": 9},
+        ]
+        buttons = grouped_pin_list(pins)[0].children[1].children
+        self.assertEqual([button.id["pin_id"] for button in buttons], [
+            "blue-surface", "blue-underground", "yellow-surface",
+            "yellow-underground",
+        ])
+
     def test_town_is_automatic_only_but_saved_town_pins_remain_accessible(self):
         self.assertNotIn("Town", CATEGORIES)
         mask = np.array([[[True]]])

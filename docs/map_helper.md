@@ -9,9 +9,11 @@ appear in the dashboard.
 
 1. From the repository root, [set up the Python environment](../README.md#environment-setup)
    if you have not already done so.
-2. Process the game's saves. The [desktop launcher](../README.md#desktop-launcher-and-live-dashboard)
-   can do this and monitor the save folder for new turns. Find the resulting
-   directory under `processed_games/`; it must contain
+2. Start [the desktop launcher](../README.md#desktop-launcher-and-live-dashboard)
+   with `venv_heroes/bin/python launcher.py`. Point it at the **raw savegame
+   directory**, enable **Monitor for new or changed save files**, and select
+   **Process and start dashboard**. Leave the launcher running in the background
+   during play. Its output directory under `processed_games/` must contain
    `combined_player_data.json`.
 3. Start Map Helper with the player you are playing:
 
@@ -51,7 +53,8 @@ pins still come from the processed saves. Run
 - The **Pins** list is on the right. Every category starts collapsed. Open a
   category to see its pins and count. A row reads, for example,
   `Dragon Utopia - Underground (114/100)`. Click a row to switch to its level
-  and center the map on that pin.
+  and center the map on that pin. Portal pins are ordered by color, so portals
+  of the same color appear together across both map levels.
 - To add a manual pin, click an **explored** map tile, enter a title, choose a
   type, optionally add notes, and select **Save pin**. Manual types are
   **Artifact**, **Joining units**, **Stat increase**, **Resource**, and
@@ -84,11 +87,13 @@ generated from the latest data and are not saved in that file.
 
 ## New turns and missing updates
 
-Map Helper checks `combined_player_data.json` every five seconds. When the
-analyzer processes a new save, the explored map and visible pins update
-automatically. The app does **not** process raw `.GM*` saves itself. Keep the
-desktop launcher's save monitoring enabled, or process the game again after a
-new save is created.
+There are two steps to an automatic update: the running desktop launcher watches
+the **raw savegame directory** and processes a new or changed `.GM*` save into
+`combined_player_data.json`; Map Helper checks that processed file every five
+seconds and then updates the explored map and visible pins. Map Helper does
+**not** process raw saves itself. If the launcher is closed or monitoring is
+disabled, run the save processor again manually before expecting Map Helper to
+advance.
 
 If the map does not advance, check that the processed game's
 `combined_player_data.json` has been updated. If the app shows only an
