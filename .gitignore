@@ -9,6 +9,9 @@ debug_saves/
 games/
 processed_games/
 venv_heroes
+.venv-windows/
+build/
+dist/
 
 # Files
 *.py[cod]
@@ -24,6 +27,7 @@ other
 *.bin
 *.txt
 !requirements.txt
+!requirements-build.txt
 *.log
 *.GM*
 !arena.GM4
