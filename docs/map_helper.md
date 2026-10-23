@@ -7,6 +7,14 @@ appear in the dashboard.
 
 ## Start the app
 
+On Windows, use `Heroes3MapHelper.exe` from the
+[Windows build](../README.md#windows-executables). Choose a processed game folder
+containing `combined_player_data.json`, select the player, and click
+**Start Map Helper**. Click **Open map** to view it. Leave the dashboard launcher
+running if you want new saves processed automatically.
+
+For the Python version:
+
 1. From the repository root, [set up the Python environment](../README.md#environment-setup)
    if you have not already done so.
 2. Start [the desktop launcher](../README.md#desktop-launcher-and-live-dashboard)

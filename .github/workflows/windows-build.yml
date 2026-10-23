@@ -1,0 +1,51 @@
+name: Build Windows apps
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows-support]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-build.txt
+      - name: Test launcher commands
+        run: python -m unittest tests.test_frozen_runtime tests.test_launcher tests.test_swap_hero_gui
+      - name: Build executables
+        shell: pwsh
+        run: .\scripts\build_windows.ps1 -Python python
+      - name: Smoke test bundled CLI modes
+        shell: pwsh
+        run: |
+          & .\dist\windows\Heroes3Dashboard\Heroes3Dashboard.exe --worker-process-saves --help
+          if ($LASTEXITCODE -ne 0) { throw "Save processor did not start" }
+          & .\dist\windows\Heroes3Dashboard\Heroes3Dashboard.exe --worker-dashboard --help
+          if ($LASTEXITCODE -ne 0) { throw "Dashboard did not start" }
+          & .\dist\windows\Heroes3SwapHeroes\Heroes3SwapHeroes.exe --worker-transfer-hero --help
+          if ($LASTEXITCODE -ne 0) { throw "Hero transfer did not start" }
+          & .\dist\windows\Heroes3MapHelper\Heroes3MapHelper.exe --help
+          if ($LASTEXITCODE -ne 0) { throw "Map Helper did not start" }
+          $saves = Join-Path $env:RUNNER_TEMP "hero-saves"
+          New-Item -ItemType Directory -Path $saves -Force | Out-Null
+          Copy-Item arena.GM4 (Join-Path $saves "111.GM4")
+          Push-Location .\dist\windows\Heroes3Dashboard
+          try {
+            & .\Heroes3Dashboard.exe --worker-process-saves $saves --output packaging-smoke
+            if ($LASTEXITCODE -ne 0) { throw "Bundled save processing failed" }
+            if (-not (Test-Path .\processed_games\packaging-smoke\combined_player_data.json)) {
+              throw "Bundled save processor did not write game data"
+            }
+          } finally {
+            Pop-Location
+          }
+          Remove-Item .\dist\windows\Heroes3Dashboard\processed_games\packaging-smoke -Recurse -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: heroes3-windows-apps
+          path: dist/windows/

@@ -49,6 +49,37 @@ After processing, the launcher restarts the dashboard and open dashboard tabs
 reload automatically. Use **Stop** or close the GUI to stop both monitoring and
 the dashboard server.
 
+### Windows executables
+
+Build the apps with **Windows Python** in PowerShell from a Windows checkout.
+PyInstaller cannot make Windows executables from Linux or WSL Python. Python is
+needed for the build, but not on the computer where the built apps run.
+
+```powershell
+py -3.12 -m venv .venv-windows
+.\.venv-windows\Scripts\python.exe -m pip install -r requirements.txt -r requirements-build.txt
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
+```
+
+The build creates three app folders under `dist\windows\`:
+
+| App | Executable | How to use it |
+| --- | --- | --- |
+| Dashboard | `Heroes3Dashboard\Heroes3Dashboard.exe` | Double-click, choose the raw saves folder, then click **Process and start dashboard**. Click **Open dashboard** to view it. |
+| Hero transfer | `Heroes3SwapHeroes\Heroes3SwapHeroes.exe` | Double-click, choose the source and arena saves, then transfer the hero. |
+| Map Helper | `Heroes3MapHelper\Heroes3MapHelper.exe` | Double-click, choose the dashboard's processed game folder and a player, then click **Start Map Helper** and **Open map**. |
+
+Keep each complete app folder, including its `_internal` folder. Put the folders
+somewhere writable: the dashboard stores processed games beside its executable,
+and the hero transfer app proposes result saves beside its executable. The
+console windows display logs and should stay open while the apps run. Map Helper
+can also be started from PowerShell with a processed game path and `--player`,
+using the same options as `map_helper_app.py`.
+
+After committing and pushing these changes to `windows-support`, the
+**Build Windows apps** GitHub Actions workflow builds these folders and provides
+them as the `heroes3-windows-apps` run artifact.
+
 Enable **Show Fog of War Exploration** in the dashboard to draw terrain, roads,
 rivers, and static obstacles from the matching `.h3m` map and installed game
 assets. Choose a player and day to see only the area explored by that player
