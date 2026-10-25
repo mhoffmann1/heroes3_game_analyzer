@@ -35,29 +35,30 @@ SCENERY_CLASSES = (set((0, 40, 124, 125, 139, 141, 142, 144, 145, 146,
                    | set(range(114, 124)) | set(range(126, 162))
                    | set(range(165, 175)) | set(range(177, 212)))
 TRANSPORT_CLASSES = {43, 44, 45, 103}
+TOWN_CLASSES = {77, 98}  # Random and specified towns.
 # Fixed-effect visit sites. IDs are H3M object class IDs (not sprite IDs).
 # Variable rewards such as Pandora's Box cannot be inferred from their
 # template alone. Explicit primary-stat Scholars are read separately below.
 BONUS_OBJECTS = {
     4: ("Arena", "Stat increase", "Attack or Defense +2"),
-    11: ("Buoy", "Morale", "Morale bonus"),
-    14: ("Swan Pond", "Luck", "Luck bonus"),
+    11: ("Buoy", "Morale and Luck", "Morale bonus"),
+    14: ("Swan Pond", "Morale and Luck", "Luck bonus"),
     23: ("Marletto Tower", "Stat increase", "Defense +1"),
-    28: ("Faerie Ring", "Luck", "Luck bonus"),
-    30: ("Fountain of Fortune", "Luck", "Luck effect varies"),
-    31: ("Fountain of Youth", "Morale", "Morale bonus"),
+    28: ("Faerie Ring", "Morale and Luck", "Luck bonus"),
+    30: ("Fountain of Fortune", "Morale and Luck", "Luck effect varies"),
+    31: ("Fountain of Youth", "Morale and Luck", "Morale bonus"),
     32: ("Garden of Revelation", "Stat increase", "Knowledge +1"),
-    38: ("Idol of Fortune", "Morale and luck", "Morale or luck, depending on day"),
+    38: ("Idol of Fortune", "Morale and Luck", "Morale or luck, depending on day"),
     41: ("Library of Enlightenment", "Stat increase", "All primary stats +2, level requirement"),
     47: ("School of Magic", "Stat increase", "Power or Knowledge +1, fee"),
     51: ("Mercenary Camp", "Stat increase", "Attack +1"),
-    52: ("Mermaid", "Luck", "Luck bonus"),
-    56: ("Oasis", "Morale", "Morale bonus"),
+    52: ("Mermaid", "Morale and Luck", "Luck bonus"),
+    56: ("Oasis", "Morale and Luck", "Morale bonus"),
     61: ("Star Axis", "Stat increase", "Power +1"),
-    64: ("Rally Flag", "Morale and luck", "Morale and luck bonus"),
-    96: ("Temple", "Morale", "Morale bonus"),
+    64: ("Rally Flag", "Morale and Luck", "Morale and luck bonus"),
+    96: ("Temple", "Morale and Luck", "Morale bonus"),
     107: ("School of War", "Stat increase", "Attack or Defense +1, fee"),
-    110: ("Watering Hole", "Morale", "Morale bonus"),
+    110: ("Watering Hole", "Morale and Luck", "Morale bonus"),
 }
 # HotA uses class 144 for several unrelated visit sites. Only subtype 2 is
 # the Colosseum of the Magi; other subtypes must not become stat pins.
@@ -405,6 +406,14 @@ def parse_map_transports(raw, terrain_start, size, levels):
     return result
 
 
+def parse_map_towns(raw, terrain_start, size, levels, town_anchors):
+    """Locate town sprites, verified against the current save's town positions."""
+    templates, start = _map_object_templates(raw, terrain_start, size, levels)
+    return [item for item in _find_template_objects(raw, start, templates,
+                                                    TOWN_CLASSES, size, levels)
+            if (item["level"], item["x"], item["y"]) in town_anchors]
+
+
 def parse_map_bonuses(raw, terrain_start, size, levels):
     """Locate standard stat, morale and luck visit sites in the matched map."""
     templates, start = _map_object_templates(raw, terrain_start, size, levels)
@@ -447,6 +456,75 @@ def parse_map_dragon_utopias(raw, terrain_start, size, levels):
     return [{**item, "title": "Dragon Utopia", "category": "Dragon Utopia",
              "notes": "Location from the original map; cleared status unknown"}
             for item in _find_template_objects(raw, start, templates, {25}, size, levels)]
+
+
+def creature_level(creature_id):
+    """Return the 1–7 map-helper tier for a Heroes III/HotA creature ID."""
+    if 0 <= creature_id < 112:  # Eight original towns, seven base/upgrade pairs each.
+        return (creature_id % 14) // 2 + 1
+    if 0x99 <= creature_id <= 0xA6:  # Cove pairs.
+        return (creature_id - 0x99) // 2 + 1
+    if 0xBA <= creature_id <= 0xC7:  # Bulwark pairs.
+        return (creature_id - 0xBA) // 2 + 1
+    if 0xAC <= creature_id <= 0xB5:  # Factory levels 2–6.
+        return (creature_id - 0xAC) // 2 + 2
+    if 0xB6 <= creature_id <= 0xB9:  # Factory's two level-7 lines.
+        return 7
+    extras = {
+        # Conflux (the IDs are not in dwelling order).
+        0x70: 2, 0x7F: 2, 0x71: 5, 0x7D: 5, 0x72: 4, 0x81: 4,
+        0x73: 3, 0x7B: 3, 0x76: 1, 0x77: 1, 0x78: 6, 0x79: 6,
+        0x82: 7, 0x83: 7,
+        # Neutral creatures. Special dragons are grouped with level 7 so the
+        # sidebar keeps the requested seven-level scale.
+        0x74: 5, 0x75: 6, 0x84: 7, 0x85: 7, 0x86: 7, 0x87: 7,
+        0x88: 6, 0x89: 4, 0x8A: 1, 0x8B: 1, 0x8C: 2,
+        0x8D: 3, 0x8E: 3, 0x8F: 2, 0x90: 5,
+        0x97: 3,  # Sea Dog is a third upgrade of Cove's level-3 Pirate.
+        0xA7: 4, 0xA8: 5, 0xA9: 2, 0xAA: 4,
+        0xAB: 1,  # Factory Halfling Grenadier upgrades the level-1 Halfling.
+    }
+    return extras.get(creature_id)
+
+
+def parse_map_creatures(raw, terrain_start, size, levels):
+    """Locate fixed creature stacks and their types in the original H3M map."""
+    templates, start = _map_object_templates(raw, terrain_start, size, levels)
+    result = []
+    for item in _find_template_objects(raw, start, templates, {54}, size, levels):
+        creature_id = item["subclass"]
+        level = creature_level(creature_id)
+        name = Savefile.creature_mapping.get(creature_id)
+        if name is None:
+            name = "Magma Elemental" if creature_id == 0x7D else f"Unknown creature ({creature_id})"
+        result.append({**item, "title": name,
+                       "category": "Creature",
+                       "creature_level": level,
+                       "notes": "Neutral stack in latest save; joining and count unknown"})
+    return result
+
+
+def active_map_creatures(save_tiles, map_creatures, shift, size, levels):
+    """Keep only stacks still present in the current save's map tile records.
+
+    The save extractor begins `shift` terrain tiles into the map. The object
+    class in each tile record refers to the following map coordinate.
+    """
+    by_position = {(item["level"], item["x"], item["y"]): item
+                   for item in map_creatures}
+    result = []
+    for index, tile in enumerate(save_tiles):
+        if len(tile) <= 8 or tile[8] != 54:
+            continue
+        position = index + shift + 1
+        if position >= size * size * levels:
+            continue
+        level, offset = divmod(position, size * size)
+        y, x = divmod(offset, size)
+        item = by_position.get((level, x, y))
+        if item is not None:
+            result.append(item)
+    return result
 
 
 def _install_directory(processed_dir, explicit=None):
@@ -495,7 +573,7 @@ def _candidate_start(raw, save_tiles, tile_count):
             return start, shift
 
 
-def match_h3m(install_dir, save_tiles, size, levels):
+def match_h3m(install_dir, save_tiles, size, levels, town_anchors=None):
     tile_count = size * size * levels
     if len(save_tiles) != tile_count:
         return None
@@ -518,15 +596,20 @@ def match_h3m(install_dir, save_tiles, size, levels):
                 try:
                     scenery = parse_map_scenery(raw, start, size, levels)
                     transports = parse_map_transports(raw, start, size, levels)
+                    towns = parse_map_towns(raw, start, size, levels, town_anchors or set())
                     bonuses = parse_map_bonuses(raw, start, size, levels)
                     utopias = parse_map_dragon_utopias(raw, start, size, levels)
+                    creatures = parse_map_creatures(raw, start, size, levels)
                 except (ValueError, IndexError, struct.error) as exc:
                     logger.warning("Could not read H3M scenery in %s: %s", path, exc)
                     scenery = []
                     transports = []
+                    towns = []
                     bonuses = []
                     utopias = []
-                return path, raw[start:start + tile_count * 7], scenery, transports, bonuses, utopias
+                    creatures = []
+                return (path, raw[start:start + tile_count * 7], scenery, transports,
+                        towns, bonuses, utopias, creatures, shift)
         except (OSError, EOFError, ValueError, struct.error):
             continue
     return None
@@ -534,12 +617,26 @@ def match_h3m(install_dir, save_tiles, size, levels):
 
 class TerrainRenderer:
     def __init__(self, terrain, archive, scenery=None, object_archives=None,
-                 transports=None, hota_archive=None, bonuses=None, utopias=None):
+                 transports=None, hota_archive=None, bonuses=None, utopias=None,
+                 creature_templates=None, creature_tile_shift=0, creatures=None,
+                 towns=None):
         self.terrain = terrain
         self.scenery = scenery or []
         self.transports = transports or []
+        self.towns = towns or []
         self.bonuses = bonuses or []
         self.utopias = utopias or []
+        self.creature_templates = creature_templates or []
+        self.creature_tile_shift = creature_tile_shift
+        self.creatures = creatures or []
+        rendered_objects = (self.transports + self.towns + self.utopias +
+                            [item for item in self.bonuses
+                             if item.get("category") == "Stat increase"])
+        self.sprite_objects = sorted(
+            set(self.scenery) | {(item["x"], item["y"], item["level"], item["name"])
+                                 for item in rendered_objects},
+            key=lambda item: (item[2], item[1], item[0]),
+        )
         self.object_archives = object_archives or [archive]
         self.object_frames = {}
         self._overview_bases = {}
@@ -620,10 +717,7 @@ class TerrainRenderer:
                         image.paste(overlay, destination, overlay)
 
             sprites = {}
-            objects = self.scenery + [
-                (item["x"], item["y"], item["level"], item["name"])
-                for item in self.transports]
-            for x, y, z, name in sorted(objects, key=lambda item: (item[2], item[1], item[0])):
+            for x, y, z, name in self.sprite_objects:
                 if z != level:
                     continue
                 if name not in sprites:
@@ -673,12 +767,9 @@ class TerrainRenderer:
                     if 0 < index < len(kind) and view_index < len(kind[index]):
                         overlay = self._flip(kind[index][view_index], tile[6], shift)
                         image.paste(overlay, destination, overlay)
-        if self.scenery or self.transports:
+        if self.sprite_objects:
             objects = Image.new("RGBA", image.size, (0, 0, 0, 0))
-            sprite_objects = self.scenery + [
-                (item["x"], item["y"], item["level"], item["name"])
-                for item in self.transports]
-            for x, y, z, name in sorted(sprite_objects, key=lambda item: (item[2], item[1], item[0])):
+            for x, y, z, name in self.sprite_objects:
                 if z != level:
                     continue
                 sprite = self._object_frame(name)
@@ -721,10 +812,21 @@ def load_terrain_renderer(processed_dir, size, levels, install_dir=None):
         latest = state["saves"][-1]["filename"]
         save = Savefile(str(save_dir / latest), parse_heroes=False)
         save_tiles = [tile for _offset, tile, _length in save.maptiles]
-        match = match_h3m(root, save_tiles, size, levels)
+        town_anchors = set()
+        for town in save.towns:
+            coords = town.get("coords")
+            if not isinstance(coords, (list, tuple)) or len(coords) != 3:
+                continue
+            x, y, layer = coords
+            z = 0 if layer in (0, "Surface") else 1 if layer in (1, "Underground") else None
+            if (z is not None and isinstance(x, int) and isinstance(y, int)
+                    and 0 <= x + 2 < size and 0 <= y < size):
+                town_anchors.add((z, x + 2, y))
+        match = match_h3m(root, save_tiles, size, levels, town_anchors)
         if match is None:
             return None, "No exact generated .h3m map matched the latest save."
-        map_path, terrain, scenery, transports, bonuses, utopias = match
+        map_path, terrain, scenery, transports, towns, bonuses, utopias, creature_templates, shift = match
+        creatures = active_map_creatures(save_tiles, creature_templates, shift, size, levels)
         archive = LodArchive(root / "Data" / "H3sprite.lod")
         object_archives = [archive]
         hota_archive = None
@@ -741,7 +843,8 @@ def load_terrain_renderer(processed_dir, size, levels, install_dir=None):
                 except ValueError:
                     logger.debug("Skipping unsupported sprite archive %s", path)
         return TerrainRenderer(terrain, archive, scenery, object_archives,
-                               transports, hota_archive, bonuses, utopias), str(map_path)
+                               transports, hota_archive, bonuses, utopias,
+                               creature_templates, shift, creatures, towns), str(map_path)
     except (OSError, ValueError, KeyError, IndexError, struct.error) as exc:
         logger.warning("Terrain graphics unavailable: %s", exc)
         return None, str(exc)

@@ -14,23 +14,90 @@ from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
 
 CATEGORY_COLORS = {
-    "Portal": "#8e44ad",
-    "Artifact": "#e0a316",
-    "Joining units": "#2b9d74",
-    "Stat increase": "#b3426a",
-    "Dragon Utopia": "#9a5635",
-    "Morale": "#47733b",
-    "Luck": "#16a5a1",
-    "Morale and luck": "#6185b9",
-    "Town": "#cf5b3f",
-    "Underground gate": "#b67e51",
-    "Resource": "#368bcc",
-    "Other": "#747b84",
+    "Portal": "#AF4CF5",
+    "Artifact": "#E6AD00",
+    "Joining units": "#00BE8A",
+    "Stat increase": "#F24589",
+    "Dragon Utopia": "#F04D45",
+    "Creature": "#4B91FF",
+    "Morale and Luck": "#826BFF",
+    "Town": "#FF8C24",
+    "Underground gate": "#637BFA",
+    "Resource": "#1BAB9E",
+    "Other": "#A0AAB5",
 }
 CATEGORIES = [category for category in CATEGORY_COLORS
-              if category not in ("Portal", "Dragon Utopia", "Morale", "Luck", "Morale and luck",
-                                  "Town", "Underground gate")]
+              if category not in ("Portal", "Dragon Utopia", "Morale and Luck",
+                                  "Town", "Underground gate", "Creature")]
+CREATURE_LEVEL_KEYS = tuple(f"Creature level {level}" for level in range(1, 8))
+UNKNOWN_CREATURE_LEVEL_KEY = "Creature (unknown level)"
 _PIN_LOCK = threading.Lock()
+_STAT_VISIT_LOCK = threading.Lock()
+
+
+def stat_site_key(pin):
+    return f"{pin['level']}:{pin['x']}:{pin['y']}"
+
+
+def read_stat_visits(path):
+    """Read user-confirmed visits; invalid or unavailable files yield no visits."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)
+            and all(isinstance(item.get(key), str) for key in ("player", "hero", "site"))]
+
+
+def write_stat_visits(path, visits):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                                         prefix=".map_stat_visits_", suffix=".tmp",
+                                         delete=False) as output:
+            temporary = output.name
+            json.dump(visits, output, ensure_ascii=False, indent=2)
+            output.write("\n")
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def visited_stat_sites(visits, player, hero):
+    return {item["site"] for item in visits
+            if item["player"] == player and item["hero"] == hero}
+
+
+def canonical_category(category):
+    """Keep pins from earlier category layouts visible."""
+    if category in ("Morale", "Luck", "Morale and luck"):
+        return "Morale and Luck"
+    return "Creature" if category in CREATURE_LEVEL_KEYS + (UNKNOWN_CREATURE_LEVEL_KEY,) else category
+
+
+def creature_level_key(pin):
+    """Use creature metadata, including levels encoded by earlier versions."""
+    level = pin.get("creature_level")
+    if isinstance(level, int) and 1 <= level <= 7:
+        return f"Creature level {level}"
+    category = pin.get("category")
+    return category if category in CREATURE_LEVEL_KEYS else UNKNOWN_CREATURE_LEVEL_KEY
+
+
+def normalized_hidden_categories(categories):
+    """Apply saved visibility from earlier category layouts."""
+    categories = categories or []
+    hidden = {category if category in CREATURE_LEVEL_KEYS + (UNKNOWN_CREATURE_LEVEL_KEY,)
+              else canonical_category(category)
+              for category in categories if category != "Creature"}
+    if "Creature" in categories:
+        hidden.update(CREATURE_LEVEL_KEYS)
+        hidden.add(UNKNOWN_CREATURE_LEVEL_KEY)
+    return hidden
 
 
 def latest_fog(df_players, player, map_size, levels):
@@ -83,10 +150,13 @@ def visible_towns(df_players, player, map_size, levels):
 
 def _visible_map_object_pins(objects, mask, player):
     """Generate player-specific read-only pins from the matched map."""
-    return [{"id": f"auto:{item['level']}:{item['x']}:{item['y']}:{item['category']}",
+    return [{"id": f"auto:{item['level']}:{item['x']}:{item['y']}:{canonical_category(item['category'])}",
              "player": player, "level": item["level"], "x": item["x"], "y": item["y"],
-             "title": item["title"], "category": item["category"],
-             "notes": item.get("notes", "Automatic marker"), "automatic": True}
+             "title": item["title"], "category": canonical_category(item["category"]),
+             "notes": item.get("notes", "Automatic marker"), "automatic": True,
+             **({"creature_level": item["creature_level"]} if "creature_level" in item else
+                {"creature_level": int(creature_level_key(item)[-1])}
+                if item.get("category") in CREATURE_LEVEL_KEYS else {})}
             for item in objects
             if is_explored(mask, item["level"], item["x"], item["y"])]
 
@@ -103,6 +173,11 @@ def visible_bonus_pins(bonuses, mask, player):
 def visible_utopia_pins(utopias, mask, player):
     """Expose Dragon Utopias only after this player has explored their tile."""
     return _visible_map_object_pins(utopias, mask, player)
+
+
+def visible_creature_pins(creatures, mask, player):
+    """Expose current creature stacks only within this player's explored area."""
+    return _visible_map_object_pins(creatures, mask, player)
 
 
 def visible_town_pins(towns, player):
@@ -161,9 +236,30 @@ def save_pin(pins, player, level, x, y, title, category, notes,
     return [p for p in pins if p.get("id") != pin_id] + [pin]
 
 
-def grouped_pin_list(pins):
+def grouped_pin_list(pins, hidden_categories=None, visited_stats=None, hero=None):
     """Build closed-by-default, clickable sections for visible pins."""
     sections = []
+    hidden_categories = normalized_hidden_categories(hidden_categories)
+    visited_stats = visited_stats or set()
+
+    def pin_buttons(group, color):
+        return html.Div([
+            html.Button(
+                f"{pin['title']} - "
+                f"{'Surface' if pin['level'] == 0 else 'Underground'} "
+                f"({pin['x']}/{pin['y']})" +
+                (f" · Visited by {hero}" if hero and pin.get("automatic")
+                 and pin.get("category") == "Stat increase"
+                 and stat_site_key(pin) in visited_stats else ""),
+                id={"type": "map_pin_button", "pin_id": pin["id"]},
+                n_clicks=0,
+                style={"display": "block", "width": "100%", "textAlign": "left",
+                       "border": "0", "borderLeft": f"4px solid {color}",
+                       "background": "#fffaf0", "padding": "7px 9px",
+                       "marginBottom": "4px", "cursor": "pointer"},
+            ) for pin in group
+        ])
+
     # Keep older manually saved Town pins accessible for review and deletion.
     for category in CATEGORY_COLORS:
         def pin_sort_key(pin):
@@ -180,34 +276,64 @@ def grouped_pin_list(pins):
         if not group:
             continue
         color = CATEGORY_COLORS[category]
+        if category == "Creature":
+            levels = []
+            for key in CREATURE_LEVEL_KEYS + (UNKNOWN_CREATURE_LEVEL_KEY,):
+                members = [pin for pin in group if creature_level_key(pin) == key]
+                if key == UNKNOWN_CREATURE_LEVEL_KEY and not members:
+                    continue
+                label = f"Level {key[-1]}" if key in CREATURE_LEVEL_KEYS else "Unknown level"
+                levels.append(html.Details([
+                    html.Summary(f"{label} ({len(members)})",
+                                 style={"fontWeight": "bold", "cursor": "pointer",
+                                        "padding": "6px 4px"}),
+                    dcc.Checklist(
+                        id={"type": "map_group_visibility", "category": key},
+                        options=[{"label": "Show on map", "value": key}],
+                        value=[] if key in hidden_categories else [key],
+                        style={"padding": "2px 10px 8px", "fontSize": "13px"},
+                        labelStyle={"cursor": "pointer"},
+                    ),
+                    pin_buttons(members, color),
+                ], open=False, style={"marginLeft": "13px", "marginBottom": "3px"}))
+            sections.append(html.Details([
+                html.Summary([
+                    html.Span(style={"display": "inline-block", "width": "10px", "height": "10px",
+                                     "backgroundColor": color, "border": "1px solid #30271d",
+                                     "borderRadius": "50%", "marginRight": "7px"}),
+                    f"Creature ({len(group)})",
+                ], style={"fontWeight": "bold", "cursor": "pointer", "padding": "8px 4px"}),
+                html.Div(levels),
+            ], open=False, style={"marginBottom": "4px"}))
+            continue
         sections.append(html.Details([
             html.Summary([
-                html.Span("● ", style={"color": color}),
+                html.Span(style={"display": "inline-block", "width": "10px", "height": "10px",
+                                 "backgroundColor": color, "border": "1px solid #30271d",
+                                 "borderRadius": "50%", "marginRight": "7px"}),
                 f"{category} ({len(group)})",
             ], style={"fontWeight": "bold", "cursor": "pointer", "padding": "8px 4px"}),
-            html.Div([
-                html.Button(
-                    f"{pin['title']} - "
-                    f"{'Surface' if pin['level'] == 0 else 'Underground'} "
-                    f"({pin['x']}/{pin['y']})",
-                    id={"type": "map_pin_button", "pin_id": pin["id"]},
-                    n_clicks=0,
-                    style={"display": "block", "width": "100%", "textAlign": "left",
-                           "border": "0", "borderLeft": f"4px solid {color}",
-                           "background": "#fffaf0", "padding": "7px 9px",
-                           "marginBottom": "4px", "cursor": "pointer"},
-                ) for pin in group
-            ]),
+            dcc.Checklist(
+                id={"type": "map_group_visibility", "category": category},
+                options=[{"label": "Show on map", "value": category}],
+                value=[] if category in hidden_categories else [category],
+                style={"padding": "2px 10px 8px", "fontSize": "13px"},
+                labelStyle={"cursor": "pointer"},
+            ),
+            pin_buttons(group, color),
         ], open=False, style={"marginBottom": "4px"}))
     return sections or [html.Div("No pins on explored tiles for this player.")]
 
 
-def map_figure(mask, day, player, level, pins, selected=None, background=None, towns=None):
+def map_figure(mask, day, player, level, pins, selected=None, background=None, towns=None,
+               hidden_categories=None, visited_stats=None, hide_visited_stats=False):
     fig = go.Figure()
     if mask is None:
         fig.update_layout(title="No valid exploration data for this player")
         return fig
     size = mask.shape[1]
+    hidden_categories = normalized_hidden_categories(hidden_categories)
+    visited_stats = visited_stats or set()
     # A categorical heatmap renders each tile without smoothing. Covered tiles stay black.
     fig.add_trace(go.Heatmap(
         z=mask[level].astype(int), x=list(range(size)), y=list(range(size)),
@@ -222,14 +348,14 @@ def map_figure(mask, day, player, level, pins, selected=None, background=None, t
                                   x=-0.5, y=-0.5, sizex=size, sizey=size,
                                   xanchor="left", yanchor="top", sizing="stretch",
                                   layer="below"))
-    for town in towns or []:
+    for town in [] if "Town" in hidden_categories else (towns or []):
         if town.get("level") != level or not is_explored(mask, level, town.get("x", -1), town.get("y", -1)):
             continue
         x, y = town["x"], town["y"]
         name = escape(str(town.get("name") or "Town"))
         fig.add_trace(go.Scatter(
             x=[x], y=[y], mode="markers", name="Town",
-            marker={"size": 16, "symbol": "square", "color": "#f4d36c",
+            marker={"size": 16, "symbol": "square", "color": CATEGORY_COLORS["Town"],
                     "line": {"color": "#3b2b17", "width": 2}},
             hovertemplate=f"{name}<br>({x}, {y})<extra></extra>",
         ))
@@ -239,14 +365,28 @@ def map_figure(mask, day, player, level, pins, selected=None, background=None, t
                            borderwidth=1, borderpad=2)
     visible = [p for p in pins if p.get("player") == player and p.get("level") == level
                and not (p.get("automatic") and p.get("category") == "Town")
+               and p.get("category") not in hidden_categories
+               and not (p.get("category") == "Creature"
+                        and creature_level_key(p) in hidden_categories)
+               and not (hide_visited_stats and p.get("automatic")
+                        and p.get("category") == "Stat increase"
+                        and stat_site_key(p) in visited_stats)
                and is_explored(mask, level, p.get("x", -1), p.get("y", -1))]
     if visible:
         fig.add_trace(go.Scatter(
             x=[p["x"] for p in visible], y=[p["y"] for p in visible], mode="markers",
             marker={"size": 17, "color": [CATEGORY_COLORS.get(p.get("category"), CATEGORY_COLORS["Other"])
                                            for p in visible],
-                    "symbol": "diamond", "line": {"color": "#222", "width": 1}},
-            text=[f'{p["category"]}: {p["title"]}' for p in visible],
+                    "symbol": ["circle-open" if p.get("automatic")
+                               and p.get("category") == "Stat increase"
+                               and stat_site_key(p) in visited_stats else "diamond"
+                               for p in visible],
+                    "line": {"color": "#222", "width": 1}},
+            text=[f'{creature_level_key(p) if p["category"] == "Creature" else p["category"]}: '
+                  f'{p["title"]}' +
+                  (' · Visited by selected hero' if p.get("automatic")
+                   and p.get("category") == "Stat increase"
+                   and stat_site_key(p) in visited_stats else '') for p in visible],
             hovertemplate="%{text}<br>(%{x}, %{y})<extra></extra>",
         ))
     focus = selected and selected.get("focus") and selected.get("level") == level
@@ -281,10 +421,11 @@ def map_figure(mask, day, player, level, pins, selected=None, background=None, t
 def register_map_helper(app, df_players, game_info, input_dir, graphics_provider=None,
                         default_player=None, data_provider=None, refresh_interval_ms=None,
                         lock_player=False, transport_provider=None, bonus_provider=None,
-                        utopia_provider=None):
+                        utopia_provider=None, creature_provider=None):
     size = int(game_info.get("map_size") or 0)
     levels = int(game_info.get("levels") or 1)
     path = Path(input_dir) / "map_pins.json"
+    stat_visits_path = Path(input_dir) / "map_stat_visits.json"
 
     def current_data():
         return data_provider() if data_provider else (df_players, 0)
@@ -292,6 +433,15 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
     def available_players(rows):
         return [p for p in rows["player_color"].dropna().unique()
                 if p != "None" and latest_fog(rows, p, size, levels)[1] is not None]
+
+    def hero_names(rows, player):
+        if player is None or "hero_summary" not in rows:
+            return []
+        matching = rows[rows["player_color"] == player]
+        if matching.empty:
+            return []
+        names = matching.iloc[-1].get("hero_summary")
+        return list(dict.fromkeys(name for name in names or [] if isinstance(name, str) and name))
 
     players = available_players(df_players)
     if default_player is not None:
@@ -304,21 +454,27 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
     if lock_player and selected_player is None:
         raise ValueError("Choose a player with valid exploration data at startup.")
     player_property = "data" if lock_player else "value"
+    initial_heroes = hero_names(df_players, selected_player)
 
     def active_player(requested):
         return selected_player if lock_player else requested
 
     def current_pins(player, mask, towns=None):
-        saved = [p for p in read_pins(path) if p.get("player") == player and
+        saved = [{**p, "category": canonical_category(p.get("category")),
+                  **({"creature_level": int(creature_level_key(p)[-1])}
+                     if creature_level_key(p) in CREATURE_LEVEL_KEYS else {})}
+                 for p in read_pins(path) if p.get("player") == player and
                  is_explored(mask, p.get("level", -1), p.get("x", -1), p.get("y", -1))]
         transports = transport_provider() if transport_provider else []
         bonuses = bonus_provider() if bonus_provider else []
         utopias = utopia_provider() if utopia_provider else []
+        creatures = creature_provider() if creature_provider else []
         if towns is None:
             towns = visible_towns(current_data()[0], player, size, levels)
         return (saved + visible_transport_pins(transports, mask, player) +
                 visible_bonus_pins(bonuses, mask, player) +
-                visible_utopia_pins(utopias, mask, player) + visible_town_pins(towns, player))
+                visible_utopia_pins(utopias, mask, player) +
+                visible_creature_pins(creatures, mask, player) + visible_town_pins(towns, player))
 
     layout = html.Div([
         html.H2("Map Helper"),
@@ -326,8 +482,10 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
         dcc.Interval(id="map_poll", interval=refresh_interval_ms or 5000,
                      disabled=refresh_interval_ms is None),
         dcc.Store(id="map_data_revision", data=0),
+        dcc.Store(id="map_hidden_categories", data=[], storage_type="session"),
         dcc.Store(id="map_selected"),
         dcc.Store(id="map_revision", data=0),
+        dcc.Store(id="map_stat_revision", data=0),
         dcc.Store(id="map_action"),
         dcc.Store(id="map_player", data=selected_player) if lock_player else None,
         html.Div([
@@ -344,6 +502,20 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
                                                  for i in range(levels)], value=0, clearable=False)],
                         style={"minWidth": "150px", "flex": "1"}),
                 ], style={"display": "flex", "gap": "12px", "flexWrap": "wrap"}),
+                html.Div([
+                    html.Label("Track stat visits for hero"),
+                    dcc.Dropdown(id="map_stat_hero", options=initial_heroes,
+                                 value=initial_heroes[0] if initial_heroes else None,
+                                 placeholder="Select a hero", clearable=True),
+                    dcc.Checklist(id="map_hide_visited_stats",
+                                  options=[{"label": "Hide objects already visited by this hero",
+                                            "value": "hide"}],
+                                  value=[], persistence=True, persistence_type="session",
+                                  style={"marginTop": "7px"}),
+                    html.Div("Visits are marked by you; the processed saves do not record "
+                             "which hero visited each stat site.",
+                             style={"fontSize": "12px", "opacity": 0.8}),
+                ], style={"maxWidth": "430px", "marginTop": "10px"}),
                 dcc.Graph(id="map_helper_graph", config={"scrollZoom": True, "displayModeBar": True},
                           style={"height": "min(82vh, 1000px)", "minHeight": "520px"}),
             ], style={"flex": "1 1 720px", "minWidth": "360px"}),
@@ -364,6 +536,9 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
                     html.Button("Delete pin", id="map_delete", n_clicks=0),
                 ], style={"display": "flex", "gap": "8px", "marginTop": "12px"}),
                 html.Div(id="map_message", role="status", style={"marginTop": "10px"}),
+                html.Button("Mark visited for selected hero", id="map_stat_visit_toggle",
+                            n_clicks=0, disabled=True, style={"marginTop": "12px"}),
+                html.Div(id="map_stat_message", role="status", style={"marginTop": "7px"}),
             ], style={"flex": "0 1 300px", "minWidth": "240px", "padding": "16px",
                       "background": "#f5f0e3", "borderRadius": "8px"}),
         ], style={"display": "flex", "gap": "18px", "flexWrap": "wrap"}),
@@ -383,6 +558,13 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
             if current_revision == revision:
                 return no_update, no_update
             return current_revision, available_players(rows)
+
+    @app.callback(Output("map_stat_hero", "options"), Output("map_stat_hero", "value"),
+                  Input("map_player", player_property), Input("map_data_revision", "data"),
+                  State("map_stat_hero", "value"))
+    def update_hero_choices(player, _revision, selected_hero):
+        names = hero_names(current_data()[0], active_player(player))
+        return names, selected_hero if selected_hero in names else names[0] if names else None
 
     @app.callback(Output("map_selected", "data"), Output("map_level", "value"),
                   Input("map_helper_graph", "clickData"),
@@ -412,6 +594,12 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
             x, y = round(point["x"]), round(point["y"])
             day, mask = latest_fog(current_data()[0], player, size, levels)
             if is_explored(mask, level, x, y):
+                if point.get("curveNumber", 0) > 0:
+                    site = next((pin for pin in current_pins(player, mask)
+                                 if pin["level"] == level and pin["x"] == x and pin["y"] == y
+                                 and pin["category"] == "Stat increase" and pin.get("automatic")), None)
+                    if site:
+                        return {**site, "focus": False}, no_update
                 return {"player": player, "level": level, "x": x, "y": y}, no_update
         return None, no_update
 
@@ -470,18 +658,90 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
                 return no_update, str(exc), no_update
         return (revision or 0) + 1, message, action
 
+    @app.callback(Output("map_stat_visit_toggle", "children"),
+                  Output("map_stat_visit_toggle", "disabled"),
+                  Input("map_selected", "data"), Input("map_stat_hero", "value"),
+                  Input("map_stat_revision", "data"), State("map_player", player_property))
+    def stat_visit_button(selected, hero, _revision, player):
+        player = active_player(player)
+        if (not hero or not selected or selected.get("player") != player
+                or selected.get("category") != "Stat increase" or not selected.get("automatic")):
+            return "Mark visited for selected hero", True
+        visited = stat_site_key(selected) in visited_stat_sites(
+            read_stat_visits(stat_visits_path), player, hero)
+        return ("Mark unvisited" if visited else "Mark visited") + f" for {hero}", False
+
+    @app.callback(Output("map_stat_revision", "data"), Output("map_stat_message", "children"),
+                  Input("map_stat_visit_toggle", "n_clicks"),
+                  State("map_selected", "data"), State("map_stat_hero", "value"),
+                  State("map_player", player_property), State("map_stat_revision", "data"),
+                  prevent_initial_call=True)
+    def toggle_stat_visit(_clicks, selected, hero, player, revision):
+        player = active_player(player)
+        rows, _ = current_data()
+        mask = latest_fog(rows, player, size, levels)[1]
+        if (not hero or hero not in hero_names(rows, player) or not selected
+                or selected.get("player") != player or selected.get("category") != "Stat increase"
+                or not selected.get("automatic") or
+                not any(pin["id"] == selected.get("id") and pin["category"] == "Stat increase"
+                        for pin in current_pins(player, mask))):
+            return no_update, "Select a discovered stat site and a current hero."
+        site = stat_site_key(selected)
+        with _STAT_VISIT_LOCK:
+            visits = read_stat_visits(stat_visits_path)
+            visited = visited_stat_sites(visits, player, hero)
+            if site in visited:
+                visits = [item for item in visits if not (item["player"] == player
+                          and item["hero"] == hero and item["site"] == site)]
+                message = f"Marked {selected['title']} unvisited for {hero}."
+            else:
+                visits.append({"player": player, "hero": hero, "site": site})
+                message = f"Marked {selected['title']} visited for {hero}."
+            try:
+                write_stat_visits(stat_visits_path, visits)
+            except OSError as exc:
+                return no_update, f"Could not save visit status: {exc}"
+        return (revision or 0) + 1, message
+
     @app.callback(Output("map_pin_list", "children"),
                   Input("map_player", player_property), Input("map_revision", "data"),
-                  Input("map_data_revision", "data"))
-    def pin_options(player, revision, data_revision):
+                  Input("map_data_revision", "data"), Input("map_stat_hero", "value"),
+                  Input("map_stat_revision", "data"),
+                  State("map_hidden_categories", "data"))
+    def pin_options(player, revision, data_revision, hero, stat_revision, hidden_categories):
         player = active_player(player)
         day, mask = latest_fog(current_data()[0], player, size, levels)
-        return grouped_pin_list(current_pins(player, mask))
+        visited = visited_stat_sites(read_stat_visits(stat_visits_path), player, hero) if hero else set()
+        return grouped_pin_list(current_pins(player, mask), hidden_categories, visited, hero)
+
+    @app.callback(Output("map_hidden_categories", "data"),
+                  Input({"type": "map_group_visibility", "category": ALL}, "value"),
+                  State({"type": "map_group_visibility", "category": ALL}, "id"),
+                  State("map_hidden_categories", "data"), prevent_initial_call=True)
+    def toggle_group(values, ids, hidden_categories):
+        triggered = ctx.triggered_id
+        if not isinstance(triggered, dict) or triggered.get("type") != "map_group_visibility":
+            return no_update
+        category = triggered.get("category")
+        current = next((value for value, item_id in zip(values, ids)
+                        if item_id.get("category") == category), None)
+        if (category not in CATEGORY_COLORS
+                and category not in CREATURE_LEVEL_KEYS + (UNKNOWN_CREATURE_LEVEL_KEY,)) or current is None:
+            return no_update
+        hidden = normalized_hidden_categories(hidden_categories)
+        if category in current:
+            hidden.discard(category)
+        else:
+            hidden.add(category)
+        return sorted(hidden) if hidden != set(hidden_categories or []) else no_update
 
     @app.callback(Output("map_helper_graph", "figure"), Input("map_player", player_property),
                   Input("map_level", "value"), Input("map_revision", "data"),
-                  Input("map_selected", "data"), Input("map_data_revision", "data"))
-    def update_map(player, level, revision, selected, data_revision):
+                  Input("map_selected", "data"), Input("map_data_revision", "data"),
+                  Input("map_hidden_categories", "data"), Input("map_stat_hero", "value"),
+                  Input("map_stat_revision", "data"), Input("map_hide_visited_stats", "value"))
+    def update_map(player, level, revision, selected, data_revision, hidden_categories,
+                   hero, stat_revision, hide_visited_stats):
         player = active_player(player)
         if player is None or level is None:
             return go.Figure()
@@ -489,7 +749,9 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
         day, mask = latest_fog(rows, player, size, levels)
         background = graphics_provider(mask, level, player) if graphics_provider and mask is not None else None
         towns = visible_towns(rows, player, size, levels)
+        visited = visited_stat_sites(read_stat_visits(stat_visits_path), player, hero) if hero else set()
         return map_figure(mask, day, player, level, current_pins(player, mask, towns),
-                          selected, background, towns)
+                          selected, background, towns, hidden_categories, visited,
+                          bool(hero and "hide" in (hide_visited_stats or [])))
 
     return layout

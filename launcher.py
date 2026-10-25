@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import re
@@ -22,6 +23,7 @@ except ImportError:  # Allows helper tests and a useful CLI error on minimal Lin
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
+CONFIG_PATH = PROJECT_DIR / "launcher_config.json"
 SAVE_NAME_PATTERN = re.compile(r"^\d{3}\.GM\d$", re.IGNORECASE)
 OUTPUT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_. -]*$")
 
@@ -50,6 +52,18 @@ def default_output_name(directory: Path) -> str:
     return cleaned or "live_game"
 
 
+def default_savegame_directory(config_path: Path = CONFIG_PATH) -> str:
+    """Read the optional starting directory for the savegame picker."""
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(config, dict):
+        return ""
+    directory = config.get("default_savegame_directory")
+    return directory.strip() if isinstance(directory, str) else ""
+
+
 class AnalyzerLauncher:
     POLL_MS = 1000
     SETTLE_SECONDS = 2.0
@@ -67,7 +81,7 @@ class AnalyzerLauncher:
         self.last_signature: tuple[tuple[str, int, int], ...] = ()
         self.dashboard_opened = False
 
-        self.path_var = tk.StringVar()
+        self.path_var = tk.StringVar(value=default_savegame_directory())
         self.output_var = tk.StringVar(value="live_game")
         self.port_var = tk.StringVar(value="8050")
         self.live_var = tk.BooleanVar(value=True)
@@ -146,9 +160,13 @@ class AnalyzerLauncher:
         self.log.configure(yscrollcommand=scrollbar.set)
 
     def choose_directory(self) -> None:
+        current = self.path_var.get().strip()
+        initial_directory = Path(current).expanduser() if current else Path.home()
+        if not initial_directory.is_dir():
+            initial_directory = Path.home()
         selected = filedialog.askdirectory(
             title="Choose the Heroes III savegame directory",
-            initialdir=self.path_var.get() or str(Path.home()),
+            initialdir=str(initial_directory),
         )
         if selected:
             directory = Path(selected)

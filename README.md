@@ -28,9 +28,16 @@ Start the GUI from the repository root with the project's Python environment:
 venv_heroes/bin/python launcher.py
 ```
 
+The launcher's **Savegame directory** field starts at
+`/mnt/c/Users/hoffm/local_games/HoMM 3 Complete/games/`. Change
+`default_savegame_directory` in [launcher_config.json](launcher_config.json)
+to use another starting location. **Browse…** opens there; select the folder
+for a specific game, which contains turn saves such as `111.GM1`. The field
+remains editable in the launcher for a one-time choice.
+
 In the launcher:
 
-1. Choose the directory where Heroes III writes the game's save files.
+1. Choose the game folder where Heroes III writes the turn save files.
 2. Give the processed game a name and, if needed, change the dashboard port.
 3. Leave **Monitor for new or changed save files** enabled for live play.
 4. Click **Process and start dashboard**.
@@ -52,7 +59,15 @@ Enable **Show Fog of War Exploration** in the dashboard to draw terrain, roads,
 rivers, and static obstacles from the matching `.h3m` map and installed game
 assets. Choose a player and day to see only the area explored by that player
 on that day. Drag to pan and scroll to zoom. Autoplay advances one day every
-1.5 seconds. When a matching map or assets are unavailable, the view falls back
+1.5 seconds. **Show hero movement** lists the chosen player's heroes on the
+selected day; the list changes as heroes appear or leave. Check a hero to see
+that hero's saved positions up to the selected day. Each hero gets a separate
+color, with markers and straight lines between consecutive saved days on the
+same map level. Missing days and changes between Surface and Underground break
+the line. The lines show displacement between saves, not the route traveled
+during a turn; portals and Town Portal can make a line jump. The map expands to
+the dashboard width and scales its height with the map's aspect ratio.
+When a matching map or assets are unavailable, the view falls back
 to its colored exploration grid. The terrain and scenery come from the original
 map, so changes to map objects during play may not appear. The standalone Map
 Helper remains a separate app.
@@ -100,8 +115,15 @@ and pointed at the **raw savegame directory**. The launcher processes each new
 save into `processed_games/YOUR_GAME`; Map Helper checks that processed data
 every five seconds. Running Map Helper alone does not process new saves. A
 matching original map and local game assets enable terrain graphics and
-automatic pins for transports, stat and morale/luck sites, and Dragon Utopias.
+automatic pins for transports, stat and morale/luck sites, Dragon Utopias, and
+creature stacks still present in the latest processed save, with level 1–7
+subgroups inside one Creature category.
+The rendered map also shows game sprites for discovered towns and Stat increase
+sites.
 Town pins come from processed saves. Covered tiles stay hidden.
+For stat sites, choose a hero, mark sites that hero has visited, and optionally
+hide marked sites on the map. These visit marks are saved in the processed game;
+the current save extraction does not identify per-hero stat-site visits.
 
 See the [Map Helper user guide](docs/map_helper.md) for setup, map controls,
 adding and editing pins, automatic categories, startup options, and

@@ -16,7 +16,7 @@ import plotly.io as pio
 from dash import State, dcc, html
 from dash.dependencies import Input, Output
 from plotly.subplots import make_subplots
-from fog_of_war import fog_of_war_figure
+from fog_of_war import OVERVIEW_TILE_SIZE, fog_of_war_figure, hero_track_colors
 from game_graphics import load_terrain_renderer
 
 logger = logging.getLogger(__package__)
@@ -243,7 +243,7 @@ def parse_data(data):
     # This can be done dynamically, but for now it isn't.
     utopias = {}
 
-    for entry in data:
+    for snapshot_index, entry in enumerate(data):
         filename = entry.get("filename", "")
         day = parse_day_from_filename(filename)
         turn_time.append(entry.get("savetime"))
@@ -273,6 +273,7 @@ def parse_data(data):
                 for hero_data in heroes:
                     hero_name = hero_data.get("name", "Unknown")
                     hero = create_hero_entry(hero_name, hero_data, player_color.capitalize(), day)
+                    hero["snapshot_index"] = snapshot_index
                     # Section for collecting hero army level stats
                     hero_army_levels_entry = {
                         "Hero": hero_name,
@@ -289,6 +290,7 @@ def parse_data(data):
             elif isinstance(heroes, dict):
                 for hero_name, hero_data in heroes.items():
                     hero = create_hero_entry(hero_name, hero_data, player_color.capitalize(), day)
+                    hero["snapshot_index"] = snapshot_index
 
                     # Section for collecting hero army level stats
                     hero_army_levels_entry = {
@@ -332,6 +334,7 @@ def parse_data(data):
             mine_counts = player_data.get("mines", {})
             player_rows.append({
                 "day": day,
+                "snapshot_index": snapshot_index,
                 "player_color": player_color.capitalize(),
                 "gold": player_data.get("resources", {}).get("gold", 0),
                 "wood": player_data.get("resources", {}).get("wood", 0),
@@ -382,6 +385,7 @@ def create_hero_entry(hero_name, hero_data, player_color, day):
         "day": day,
         "player_color": player_color,
         "hero_name": hero_name,
+        "coords": hero_data.get("coords"),
         "level": hero_data.get("level", 0),
         "experience": hero_data.get("experience", 0),
         "army_strength": hero_data.get("army_strength", 0),
@@ -1173,6 +1177,37 @@ def run_dashboard(
         df_heroes, default_players, limit=1
     )
     summary_days = sorted(df_players["day"].dropna().unique())
+    fog_players = [p for p in PLAYER_ORDER if p in df_players["player_color"].unique()]
+    fog_default_player = "Red" if "Red" in fog_players else fog_players[0] if fog_players else None
+    fog_initial_day = int(df_players["day"].min())
+    fog_map_size = int(game_info.get("map_size") or 36)
+    fog_map_levels = int(game_info.get("levels") or 1)
+    fog_map_width = (fog_map_levels * fog_map_size * OVERVIEW_TILE_SIZE +
+                     (fog_map_levels - 1) * OVERVIEW_TILE_SIZE * 5)
+    fog_map_height = fog_map_size * OVERVIEW_TILE_SIZE + 80
+
+    def fog_day_heroes(player, day):
+        if day is None or not {"player_color", "hero_name", "day"}.issubset(df_heroes.columns):
+            return df_heroes.iloc[0:0]
+        player_days = df_players[(df_players["player_color"] == player) &
+                                 (df_players["day"] == day)]
+        if player_days.empty:
+            return df_heroes.iloc[0:0]
+        if "snapshot_index" in df_heroes and "snapshot_index" in player_days:
+            snapshot_index = player_days.iloc[-1]["snapshot_index"]
+            return df_heroes[(df_heroes["player_color"] == player) &
+                             (df_heroes["snapshot_index"] == snapshot_index)]
+        return df_heroes[(df_heroes["player_color"] == player) & (df_heroes["day"] == day)]
+
+    def fog_hero_options(player, day):
+        colors = hero_track_colors(df_heroes, player)
+        day_heroes = fog_day_heroes(player, day)
+        present = ({name for name in day_heroes["hero_name"]
+                    if isinstance(name, str) and name}
+                   if "hero_name" in day_heroes else set())
+        return [{"label": html.Span([
+                    html.Span("● ", style={"color": color, "fontWeight": "bold"}), name]),
+                 "value": name} for name, color in colors.items() if name in present]
     optional_game_info_keys = {"total_utopias", "total_towns"}
     hidden_game_info_keys = {
         "map_visibility_base",
@@ -1679,28 +1714,37 @@ def run_dashboard(
                 html.Label("Select Player"),
                 dcc.Dropdown(
                     id="fog_player_selector",
-                    options=[
-                        {"label": p, "value": p}
-                        for p in PLAYER_ORDER if p in df_players["player_color"].unique()
-                    ],
-                    value="Red",
+                    options=[{"label": p, "value": p} for p in fog_players],
+                    value=fog_default_player,
                     clearable=False
                 ),
+                html.Label("Show hero movement (heroes on selected day)",
+                           style={"display": "block", "marginTop": "10px"}),
+                dcc.Checklist(
+                    id="fog_hero_selector",
+                    options=fog_hero_options(fog_default_player, fog_initial_day),
+                    value=[],
+                    inline=True,
+                    style={"maxHeight": "130px", "overflowY": "auto"},
+                    labelStyle={"display": "inline-block", "marginRight": "14px"},
+                ),
+                html.Div("Lines connect positions in consecutive saved days on the same map level; "
+                         "they do not show the route taken during a turn.",
+                         style={"fontSize": "12px", "marginTop": "5px"}),
                 html.Div([
                     html.Button("Play", id="fog_play_btn", n_clicks=0),
                     html.Button("Pause", id="fog_pause_btn", n_clicks=0),
                     html.Span("1.5 seconds per turn", style={"marginLeft": "10px"}),
                     dcc.Interval(id="fog_anim_interval", interval=1500, n_intervals=0, disabled=True)
                 ], style={"margin": "10px 0"}),
-                dcc.Graph(
+                html.Div(dcc.Graph(
                     id="fog_of_war_map",
                     config={"scrollZoom": True, "displayModeBar": True},
-                    style={
-                        "width": "1000px",
-                        "maxWidth": "100%",
-                        "margin": "14px auto 24px",
-                    },
-                ),
+                    responsive=True,
+                    style={"width": "100%", "height": "100%"},
+                ), id="fog_map_frame", style={"width": "100%",
+                           "aspectRatio": f"{fog_map_width} / {fog_map_height}",
+                           "margin": "14px 0 24px"}),
                 dcc.Slider(
                     id="fog_day_slider",
                     min=df_players["day"].min(),
@@ -2686,12 +2730,25 @@ def run_dashboard(
 
 
     @app.callback(
+        Output("fog_hero_selector", "options"),
+        Output("fog_hero_selector", "value"),
+        Input("fog_player_selector", "value"),
+        Input("fog_day_slider", "value"),
+        State("fog_hero_selector", "value"),
+    )
+    def update_fog_heroes(player_color, selected_day, selected_heroes):
+        options = fog_hero_options(player_color, selected_day)
+        available = {option["value"] for option in options}
+        return options, [hero for hero in selected_heroes or [] if hero in available]
+
+    @app.callback(
         Output("fog_of_war_map", "figure"),
         Input("fog_player_selector", "value"),
         Input("fog_day_slider", "value"),
         Input("toggle_fog_of_war", "value"),
+        Input("fog_hero_selector", "value"),
     )
-    def update_fog_map(player_color, selected_day, visibility):
+    def update_fog_map(player_color, selected_day, visibility, selected_heroes):
         if "show" not in (visibility or []) or not player_color or selected_day is None:
             return go.Figure()
         rows = df_players[
@@ -2701,12 +2758,20 @@ def run_dashboard(
         if rows.empty:
             return go.Figure()
         row = rows.iloc[-1]
+        available_heroes = {option["value"] for option in fog_hero_options(player_color, selected_day)}
+        selected_heroes = [hero for hero in selected_heroes or [] if hero in available_heroes]
+        hero_history = df_heroes
+        if "snapshot_index" in df_heroes and "snapshot_index" in df_players:
+            latest_snapshots = (df_players[df_players["player_color"] == player_color]
+                                .drop_duplicates("day", keep="last")["snapshot_index"])
+            hero_history = df_heroes[df_heroes["snapshot_index"].isin(latest_snapshots)]
         return fog_of_war_figure(
             player_color, selected_day, row.get("fog_of_war"),
             row.get("town_summary"), df_utopias,
             game_info.get("map_size") or 36, game_info.get("levels") or 1,
             PLAYER_COLORS.get(player_color, "#999999"),
             game_info.get("map_visibility_offset", "unknown"), terrain_renderer,
+            hero_history, selected_heroes, hero_track_colors(df_heroes, player_color),
         )
 
     app.run(debug=not live_reload, use_reloader=False, port=port)
