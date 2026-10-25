@@ -12,7 +12,8 @@ import pandas as pd
 from dash import html
 
 from map_helper import register_map_helper
-from game_graphics import load_terrain_renderer
+from game_graphics import active_map_creatures, load_terrain_renderer
+from h3tools.metadata import Savefile
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,8 @@ def load_latest_players(directory):
         for color, player in entry.get("players", {}).items():
             row = {"day": day, "player_color": color.capitalize(),
                    "fog_of_war": player.get("fog_of_war", ""),
+                   "hero_summary": [hero.get("name") for hero in player.get("heroes") or []
+                                    if isinstance(hero, dict) and hero.get("name")],
                    "town_summary": [
                        {"town_name": town.get("name"), "coords": town.get("coords")}
                        for town in player.get("towns") or []
@@ -115,6 +118,31 @@ def create_app(directory, *, player, game_dir=None, graphics=True):
 
     image_cache = {}
     cache_lock = threading.Lock()
+    creature_cache = {"signature": None, "items": getattr(renderer, "creatures", [])}
+    creature_lock = threading.Lock()
+
+    def creature_provider():
+        if renderer is None or not hasattr(renderer, "creature_templates"):
+            return []
+        with creature_lock:
+            try:
+                state = json.loads((directory / ".incremental_state.json").read_text(encoding="utf-8"))
+                save_path = Path(state["source_directory"]) / state["saves"][-1]["filename"]
+                stat = save_path.stat()
+                signature = (str(save_path), stat.st_mtime_ns, stat.st_size)
+                if signature != creature_cache["signature"]:
+                    save = Savefile(str(save_path), parse_heroes=False)
+                    if (int(save.mapdata["size"]) != int(game_info["map_size"])
+                            or int(save.mapdata["levels"]) != int(game_info.get("levels") or 1)):
+                        raise ValueError("Creature save map dimensions do not match")
+                    tiles = [tile for _offset, tile, _length in save.maptiles]
+                    creature_cache["items"] = active_map_creatures(
+                        tiles, renderer.creature_templates, renderer.creature_tile_shift,
+                        int(game_info["map_size"]), int(game_info.get("levels") or 1))
+                    creature_cache["signature"] = signature
+            except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+                logger.warning("Creature markers refresh deferred: %s", exc)
+            return creature_cache["items"]
 
     def graphics_provider(mask, level, player):
         if renderer is None:
@@ -139,6 +167,7 @@ def create_app(directory, *, player, game_dir=None, graphics=True):
                                       transport_provider=(lambda: renderer.transports) if renderer else None,
                                       bonus_provider=(lambda: renderer.bonuses) if renderer else None,
                                       utopia_provider=(lambda: renderer.utopias) if renderer else None,
+                                      creature_provider=creature_provider if renderer else None,
                                       default_player=player, data_provider=data.get,
                                       refresh_interval_ms=5000, lock_player=True),
                   style={"width": "100%", "boxSizing": "border-box", "margin": "0 auto",

@@ -10,10 +10,13 @@ import numpy as np
 from PIL import Image
 
 from game_graphics import (LodArchive, TerrainRenderer, _candidate_start,
+                           active_map_creatures,
+                           creature_level,
                            decode_hota_terrain_tile, decode_object_def,
-                           decode_terrain_def, parse_map_bonuses, parse_map_dragon_utopias,
+                           decode_terrain_def, parse_map_bonuses, parse_map_creatures,
+                           parse_map_dragon_utopias,
                            parse_map_scenery,
-                           parse_map_transports)
+                           parse_map_transports, parse_map_towns)
 
 
 def simple_def(rgb):
@@ -57,7 +60,9 @@ def simple_object_def():
 
 
 class FakeArchive:
-    entries = {"TREE.DEF": True, "PORTAL.DEF": True, "CAVE.DEF": True}
+    entries = {"TREE.DEF": True, "PORTAL.DEF": True, "CAVE.DEF": True,
+               "UTOPIA.DEF": True, "ARENA.DEF": True, "LUCK.DEF": True,
+               "TOWN.DEF": True}
 
     def read(self, name):
         if name in self.entries:
@@ -158,6 +163,67 @@ class GameGraphicsTests(unittest.TestCase):
         self.assertEqual(decode(second).getpixel((12, 4)), (200, 30, 20))
         self.assertEqual(len(renderer._overview_bases), 1)
 
+    def test_dragon_utopia_sprite_is_drawn_only_on_explored_tiles(self):
+        utopia = {"x": 1, "y": 0, "level": 0, "name": "UTOPIA.DEF",
+                  "title": "Dragon Utopia", "category": "Dragon Utopia"}
+        renderer = TerrainRenderer(bytes(4 * 7), FakeArchive(), utopias=[utopia])
+        mask = np.array([[[True, False], [False, False]]])
+        image = Image.open(io.BytesIO(renderer.render_png(mask, 0)))
+        self.assertEqual(image.getpixel((16, 16)), (200, 30, 20))
+        self.assertEqual(image.getpixel((48, 16)), (21, 23, 29))
+
+        url = renderer.render_overview_data_url(mask, 0)
+        overview = Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1])))
+        self.assertEqual(overview.getpixel((4, 4)), (200, 30, 20))
+        self.assertEqual(overview.getpixel((12, 4)), (21, 23, 29))
+
+    def test_stat_site_sprite_respects_fog_and_is_not_drawn_twice(self):
+        arena = {"x": 1, "y": 0, "level": 0, "name": "ARENA.DEF",
+                 "title": "Arena", "category": "Stat increase"}
+        luck = {"x": 0, "y": 1, "level": 0, "name": "LUCK.DEF",
+                "title": "Swan Pond", "category": "Morale and Luck"}
+        renderer = TerrainRenderer(bytes(4 * 7), FakeArchive(),
+                                   scenery=[(1, 0, 0, "ARENA.DEF")],
+                                   bonuses=[arena, luck])
+        self.assertEqual(renderer.sprite_objects, [(1, 0, 0, "ARENA.DEF")])
+        mask = np.array([[[True, False], [False, True]]])
+        image = Image.open(io.BytesIO(renderer.render_png(mask, 0)))
+        self.assertEqual(image.getpixel((16, 16)), (200, 30, 20))
+        self.assertEqual(image.getpixel((48, 16)), (21, 23, 29))
+        self.assertEqual(image.getpixel((16, 48)), (21, 23, 29))
+        overview_url = renderer.render_overview_data_url(mask, 0)
+        overview = Image.open(io.BytesIO(base64.b64decode(overview_url.split(",", 1)[1])))
+        self.assertEqual(overview.getpixel((4, 4)), (200, 30, 20))
+        self.assertEqual(overview.getpixel((12, 4)), (21, 23, 29))
+
+    def test_town_sprite_is_drawn_only_on_explored_tiles(self):
+        town = {"x": 1, "y": 0, "level": 0, "name": "TOWN.DEF",
+                "object_class": 98, "subclass": 0}
+        renderer = TerrainRenderer(bytes(4 * 7), FakeArchive(), towns=[town])
+        mask = np.array([[[True, False], [False, False]]])
+        image = Image.open(io.BytesIO(renderer.render_png(mask, 0)))
+        self.assertEqual(image.getpixel((16, 16)), (200, 30, 20))
+        self.assertEqual(image.getpixel((48, 16)), (21, 23, 29))
+        overview_url = renderer.render_overview_data_url(mask, 0)
+        overview = Image.open(io.BytesIO(base64.b64decode(overview_url.split(",", 1)[1])))
+        self.assertEqual(overview.getpixel((4, 4)), (200, 30, 20))
+        self.assertEqual(overview.getpixel((12, 4)), (21, 23, 29))
+
+    def test_finds_fixed_and_random_town_sprite_anchors(self):
+        def template(name, object_class):
+            return (struct.pack("<I", len(name)) + name + bytes(16) +
+                    struct.pack("<II", object_class, 0) + bytes(18))
+
+        raw = (bytes(4 * 7) + struct.pack("<I", 2) +
+               template(b"TOWN.DEF", 98) + template(b"RANDOM.DEF", 77) +
+               struct.pack("<I", 2) +
+               bytes((1, 0, 0)) + struct.pack("<I", 0) + bytes(5) +
+               bytes((0, 1, 0)) + struct.pack("<I", 1) + bytes(5))
+        towns = parse_map_towns(raw, 0, 2, 1, {(0, 1, 0), (0, 0, 1)})
+        self.assertEqual([(item["x"], item["y"], item["name"], item["object_class"])
+                          for item in towns],
+                         [(1, 0, "TOWN.DEF", 98), (0, 1, "RANDOM.DEF", 77)])
+
     def test_reads_initial_scenery_objects_from_h3m(self):
         template = (struct.pack("<I", 8) + b"TREE.DEF" + bytes(16) +
                     struct.pack("<II", 199, 0) + bytes(18))
@@ -204,7 +270,7 @@ class GameGraphicsTests(unittest.TestCase):
         self.assertEqual([(item["x"], item["y"], item["title"], item["category"])
                           for item in bonuses],
                          [(0, 1, "Arena", "Stat increase"),
-                          (1, 1, "Rally Flag", "Morale and luck")])
+                          (1, 1, "Rally Flag", "Morale and Luck")])
 
     def test_primary_stat_scholar_is_pinned_but_spell_scholar_is_not(self):
         template = (struct.pack("<I", 11) + b"SCHOLAR.DEF" + bytes(16) +
@@ -249,6 +315,42 @@ class GameGraphicsTests(unittest.TestCase):
         self.assertEqual([(item["x"], item["y"], item["title"], item["category"])
                           for item in utopias],
                          [(1, 0, "Dragon Utopia", "Dragon Utopia")])
+
+    def test_creature_names_and_current_save_presence(self):
+        def template(name, creature_id):
+            return (struct.pack("<I", len(name)) + name + bytes(16) +
+                    struct.pack("<II", 54, creature_id) + bytes(18))
+
+        raw = (bytes(3 * 3 * 7) + struct.pack("<I", 2) +
+               template(b"AVWPIKE.DEF", 0) + template(b"AVWARCH.DEF", 2) +
+               struct.pack("<I", 2) +
+               bytes((2, 0, 0)) + struct.pack("<I", 0) + bytes(5) + bytes(16) +
+               bytes((0, 1, 0)) + struct.pack("<I", 1) + bytes(5) + bytes(16))
+        creatures = parse_map_creatures(raw, 0, 3, 1)
+        self.assertEqual({item["title"] for item in creatures}, {"Pikeman", "Archer"})
+        self.assertEqual({item["title"]: (item["category"], item["creature_level"])
+                          for item in creatures},
+                         {"Pikeman": ("Creature", 1), "Archer": ("Creature", 2)})
+        empty = bytes(22)
+        monster = bytes(8) + bytes((54,)) + bytes(13)
+        # The object class at save tile index one belongs to map tile two.
+        self.assertEqual(active_map_creatures([empty, monster] + [empty] * 7,
+                                              creatures, 0, 3, 1), [creatures[0]])
+        self.assertEqual(active_map_creatures([empty] * 9, creatures, 0, 3, 1), [])
+
+    def test_creature_levels_cover_upgrades_hota_and_neutrals(self):
+        pairs = ((0x00, 0x01, 1), (0x3E, 0x3F, 4),
+                 (0x76, 0x77, 1), (0x70, 0x7F, 2),
+                 (0x9D, 0x9E, 3), (0x8A, 0xAB, 1),
+                 (0xC4, 0xC5, 6), (0xC6, 0xC7, 7))
+        for base, upgrade, level in pairs:
+            with self.subTest(base=base, upgrade=upgrade):
+                self.assertEqual(creature_level(base), level)
+                self.assertEqual(creature_level(upgrade), level)
+        self.assertEqual(creature_level(0x97), 3)  # Sea Dog.
+        self.assertEqual(creature_level(0xA9), 2)  # Leprechaun.
+        self.assertEqual(creature_level(0x85), 7)  # Special dragon in 1–7 view.
+        self.assertIsNone(creature_level(0xFFFF))
 
 
 if __name__ == "__main__":

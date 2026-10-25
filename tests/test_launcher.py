@@ -2,7 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from launcher import default_output_name, save_directory_signature, valid_output_name
+from launcher import (default_output_name, default_savegame_directory,
+                      save_directory_signature, valid_output_name)
 
 
 class LauncherHelpersTests(unittest.TestCase):
@@ -27,6 +28,18 @@ class LauncherHelpersTests(unittest.TestCase):
 
     def test_default_output_name_replaces_path_punctuation(self):
         self.assertEqual("game_ one", default_output_name(Path("game: one")))
+
+    def test_savegame_directory_comes_from_config(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            config_path = Path(temporary_directory) / "launcher_config.json"
+            config_path.write_text(
+                '{"default_savegame_directory": " /mnt/c/Heroes games/ "}',
+                encoding="utf-8",
+            )
+            self.assertEqual("/mnt/c/Heroes games/",
+                             default_savegame_directory(config_path))
+            config_path.write_text("invalid JSON", encoding="utf-8")
+            self.assertEqual("", default_savegame_directory(config_path))
 
 
 if __name__ == "__main__":

@@ -42,7 +42,7 @@ venv_heroes/bin/python map_helper_app.py "processed_games/YOUR_GAME" \
 
 The map editor is not required. If graphics are unavailable, the app shows an
 exploration grid. `--no-graphics` forces that grid; it also disables pins read
-from the original map, such as portals, bonus sites, and Dragon Utopias. Town
+from the original map, such as portals, bonus sites, Dragon Utopias, and creatures. Town
 pins still come from the processed saves. Run
 `venv_heroes/bin/python map_helper_app.py --help` for all startup options.
 
@@ -55,6 +55,20 @@ pins still come from the processed saves. Run
   `Dragon Utopia - Underground (114/100)`. Click a row to switch to its level
   and center the map on that pin. Portal pins are ordered by color, so portals
   of the same color appear together across both map levels.
+- Open a category and use **Show on map** to show or hide all its pins on
+  the map. The category and its entries stay in the list, and the choice is
+  remembered for this browser session. Hiding Town also hides town name labels.
+  Terrain and object graphics remain visible.
+- Open **Creature** to see level 1–7 subcategories. Each level has its own
+  **Show on map** checkbox, so you can hide one level while keeping the others.
+  All creature pins use the same color.
+- Choose a hero in **Track stat visits for hero**. Open **Stat increase** and
+  select a discovered automatic site, or click its map marker, then use **Mark
+  visited**. Marked sites have an open-circle pin and a visited label in the
+  list. **Hide objects already visited by this hero** removes those pins from
+  the map while leaving them in the list so you can select and unmark them.
+  Changing heroes shows that hero's own marked visits. Manual Stat increase
+  pins cannot be marked visited.
 - To add a manual pin, click an **explored** map tile, enter a title, choose a
   type, optionally add notes, and select **Save pin**. Manual types are
   **Artifact**, **Joining units**, **Stat increase**, **Resource**, and
@@ -71,12 +85,27 @@ chosen player:
 | Town | Towns in processed saves, including discovered neutral and rival towns |
 | Portal, Underground gate | Monoliths, portals, and gates in the matched map; portal names include their color |
 | Stat increase | Primary-stat visit sites, including Colosseum of the Magi and specified primary-stat Scholars |
-| Morale, Luck, Morale and luck | Visit sites with those effects |
+| Morale and Luck | Visit sites that affect morale, luck, or both; each pin's notes identify its effect |
 | Dragon Utopia | Dragon Utopia locations in the matched map |
+| Creature | Neutral creature stacks still present in the latest processed save; nested level 1–7 groups contain base and upgraded creatures of the same level |
+
+When map graphics are available, towns, Dragon Utopias, and Stat increase sites
+also appear with their game sprites on the rendered terrain. Town sprites are
+matched against the towns in the latest save; their name pins still come from
+processed saves. Fog still covers every
+unexplored tile, including any hidden part of a sprite. Hiding a pin leaves its
+terrain object visible. These sprites come from the original map, so a
+one-time Scholar may still appear after it has been collected.
 
 The original map does not tell the app whether a Dragon Utopia has been
 cleared in the current game. Some objects have conditional or random rewards;
 their pin names identify the site, rather than promising a specific outcome.
+Creature pins disappear after their stacks are removed from a processed save.
+Their names identify the original creature type; the pin does not show stack
+size or whether the creatures will join a hero. Random creature placeholders
+whose type cannot be identified are omitted. Special neutral dragons are shown
+with level 7 so every known stack fits the seven-level view. Creatures with an
+unknown level appear under **Unknown level** inside Creature.
 Custom event rewards, Pandora's Boxes, and random-reward Scholars are not
 detected automatically. You can mark other points of interest with a manual
 pin.
@@ -84,13 +113,19 @@ pin.
 Manual pins are stored in `map_pins.json` in the processed game's directory.
 They are separate for each player and survive app restarts. Automatic pins are
 generated from the latest data and are not saved in that file.
+Hero stat-site visits are stored separately in `map_stat_visits.json` in the
+same directory. These are **user-confirmed marks**: the processed saves do not
+contain a reliable per-hero visit history. An unmarked site means its visit
+status is unknown, not that the hero definitely has not visited it. New heroes
+appear in the dropdown when a new processed turn is loaded.
 
 ## New turns and missing updates
 
 There are two steps to an automatic update: the running desktop launcher watches
 the **raw savegame directory** and processes a new or changed `.GM*` save into
 `combined_player_data.json`; Map Helper checks that processed file every five
-seconds and then updates the explored map and visible pins. Map Helper does
+seconds and then updates the explored map and visible pins, including current
+creature stacks. Map Helper does
 **not** process raw saves itself. If the launcher is closed or monitoring is
 disabled, run the save processor again manually before expecting Map Helper to
 advance.
