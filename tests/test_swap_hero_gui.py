@@ -1,6 +1,8 @@
+import sys
 import unittest
-from tempfile import TemporaryDirectory
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from swap_hero_gui import PROJECT_DIR, build_swap_command, next_result_path
 
@@ -25,7 +27,7 @@ class SwapHeroGUICommandTests(unittest.TestCase):
         self.assertEqual("12", command[command.index("--set-x") + 1])
         self.assertEqual("15", command[command.index("--set-y") + 1])
         self.assertEqual("0", command[command.index("--set-z") + 1])
-        self.assertEqual("/tmp/result.GM4", command[command.index("--out") + 1])
+        self.assertEqual(str(Path("/tmp/result.GM4")), command[command.index("--out") + 1])
 
     def test_suggests_unused_numbered_result_for_chained_transfer(self):
         with TemporaryDirectory() as directory:
@@ -47,6 +49,17 @@ class SwapHeroGUICommandTests(unittest.TestCase):
                 Path(directory) / "arena_3.GM4",
                 next_result_path(completed),
             )
+
+    def test_frozen_transfer_command_uses_executable(self):
+        with patch.object(sys, "frozen", True, create=True):
+            command = build_swap_command(
+                "Heroes3SwapHeroes.exe", Path("source.GM2"), Path("arena.GM4"),
+                "Sir Mullich", Path("result.GM4"), "Blue", 12, 15,
+            )
+
+        self.assertEqual(
+            ["Heroes3SwapHeroes.exe", "--worker-transfer-hero"], command[:2]
+        )
 
 
 if __name__ == "__main__":

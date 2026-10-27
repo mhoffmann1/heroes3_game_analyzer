@@ -1077,9 +1077,9 @@ def main():
     try:
         # Load AI unit values
         try:
-            with open("creature_ai_values.json", "r") as f:
+            with open(Path(__file__).resolve().parent / "creature_ai_values.json", "r") as f:
                 ai_values = json.load(f)
-            with open("unit_stats.json", "r") as f:
+            with open(Path(__file__).resolve().parent / "unit_stats.json", "r") as f:
                 unit_stats = json.load(f)
                 
         except FileNotFoundError:

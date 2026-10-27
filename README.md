@@ -28,12 +28,17 @@ Start the GUI from the repository root with the project's Python environment:
 venv_heroes/bin/python launcher.py
 ```
 
-The launcher's **Savegame directory** field starts at
+When run from the repository with Python, the launcher's **Savegame directory**
+field starts at
 `/mnt/c/Users/hoffm/local_games/HoMM 3 Complete/games/`. Change
 `default_savegame_directory` in [launcher_config.json](launcher_config.json)
 to use another starting location. **Browse…** opens there; select the folder
 for a specific game, which contains turn saves such as `111.GM1`. The field
 remains editable in the launcher for a one-time choice.
+
+The Windows executable starts with an empty savegame directory unless you put
+`launcher_config.json` beside `Heroes3Dashboard.exe`. Use a Windows path in that
+file, for example `{"default_savegame_directory": "C:/Games/Heroes3/games"}`.
 
 In the launcher:
 
@@ -42,10 +47,11 @@ In the launcher:
 3. Leave **Monitor for new or changed save files** enabled for live play.
 4. Click **Process and start dashboard**.
 
-The launcher processes the existing saves, starts the dashboard, and opens it in
-the default browser. While monitoring is enabled, it detects new or overwritten
-turn saves and waits briefly for Heroes III to finish writing the file. Newly
-appended turns are processed incrementally: unchanged historical saves are read
+The launcher processes the existing saves and starts the dashboard. Click
+**Open dashboard** when you want to view it in your browser. While monitoring
+is enabled, the launcher detects new or overwritten turn saves and waits briefly
+for Heroes III to finish writing the file. Newly appended turns are processed
+incrementally: unchanged historical saves are read
 from the cache and only the new save is parsed. If an older save is overwritten,
 removed, or inserted out of order, the analyzer automatically performs a safe
 full rebuild. The first run after upgrading from an older analyzer version also
@@ -54,6 +60,37 @@ builds the incremental cache once.
 After processing, the launcher restarts the dashboard and open dashboard tabs
 reload automatically. Use **Stop** or close the GUI to stop both monitoring and
 the dashboard server.
+
+### Windows executables
+
+Build the apps with **Windows Python** in PowerShell from a Windows checkout.
+PyInstaller cannot make Windows executables from Linux or WSL Python. Python is
+needed for the build, but not on the computer where the built apps run.
+
+```powershell
+py -3.12 -m venv .venv-windows
+.\.venv-windows\Scripts\python.exe -m pip install -r requirements.txt -r requirements-build.txt
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
+```
+
+The build creates three app folders under `dist\windows\`:
+
+| App | Executable | How to use it |
+| --- | --- | --- |
+| Dashboard | `Heroes3Dashboard\Heroes3Dashboard.exe` | Double-click, choose the raw saves folder, then click **Process and start dashboard**. Click **Open dashboard** to view it. |
+| Hero transfer | `Heroes3SwapHeroes\Heroes3SwapHeroes.exe` | Double-click, choose the source and arena saves, then transfer the hero. |
+| Map Helper | `Heroes3MapHelper\Heroes3MapHelper.exe` | Double-click, choose the dashboard's processed game folder and a player, then click **Start Map Helper** and **Open map**. |
+
+Keep each complete app folder, including its `_internal` folder. Put the folders
+somewhere writable: the dashboard stores processed games beside its executable,
+and the hero transfer app proposes result saves beside its executable. The
+console windows display logs and should stay open while the apps run. Map Helper
+can also be started from PowerShell with a processed game path and `--player`,
+using the same options as `map_helper_app.py`.
+
+After committing and pushing these changes to `windows-support`, the
+**Build Windows apps** GitHub Actions workflow builds these folders and provides
+them as the `heroes3-windows-apps` run artifact.
 
 Enable **Show Fog of War Exploration** in the dashboard to draw terrain, roads,
 rivers, and static obstacles from the matching `.h3m` map and installed game

@@ -1,9 +1,16 @@
+import queue
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
-from launcher import (default_output_name, default_savegame_directory,
-                      save_directory_signature, valid_output_name)
+from launcher import (
+    AnalyzerLauncher,
+    default_output_name,
+    default_savegame_directory,
+    save_directory_signature,
+    valid_output_name,
+)
 
 
 class LauncherHelpersTests(unittest.TestCase):
@@ -40,6 +47,21 @@ class LauncherHelpersTests(unittest.TestCase):
                              default_savegame_directory(config_path))
             config_path.write_text("invalid JSON", encoding="utf-8")
             self.assertEqual("", default_savegame_directory(config_path))
+
+    def test_dashboard_ready_does_not_open_browser(self):
+        launcher = AnalyzerLauncher.__new__(AnalyzerLauncher)
+        launcher.active = True
+        launcher.monitoring = False
+        launcher.events = queue.Queue()
+        launcher.events.put(("dashboard_ready",))
+        launcher.status_var = Mock()
+        launcher.root = Mock()
+
+        with patch("launcher.webbrowser.open") as open_browser:
+            launcher._drain_events()
+
+        open_browser.assert_not_called()
+        launcher.status_var.set.assert_called_once_with("Dashboard is running.")
 
 
 if __name__ == "__main__":

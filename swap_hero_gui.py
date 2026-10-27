@@ -10,6 +10,8 @@ import sys
 import threading
 from pathlib import Path
 
+from frozen_runtime import app_directory, worker_command
+
 try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
@@ -18,7 +20,7 @@ except ImportError:  # Keep imports useful on systems without the Tk package.
     filedialog = messagebox = ttk = None
 
 
-PROJECT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = app_directory()
 DEFAULT_SOURCE_DIRECTORY = Path(
     "/mnt/c/Users/hoffm/local_games/HoMM 3 Complete/games"
 )
@@ -42,10 +44,7 @@ def build_swap_command(
     y: int,
 ) -> list[str]:
     """Build the CLI command used by the GUI."""
-    return [
-        python,
-        "-u",
-        str(PROJECT_DIR / "swap_hero.py"),
+    return worker_command("transfer-hero", "swap_hero.py", python=python) + [
         "--input",
         str(source),
         "--output",
@@ -399,6 +398,13 @@ class HeroTransferGUI:
 
 
 def main() -> None:
+    if getattr(sys, "frozen", False) and len(sys.argv) > 1:
+        if sys.argv[1] == "--worker-transfer-hero":
+            sys.argv.pop(1)
+            from swap_hero import main as transfer_hero
+
+            transfer_hero()
+            return
     if tk is None:
         raise SystemExit(
             "The hero transfer GUI needs tkinter. Install python3-tk (Linux) or "

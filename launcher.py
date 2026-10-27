@@ -14,6 +14,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from frozen_runtime import app_directory, worker_command
+
 try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
@@ -22,7 +24,7 @@ except ImportError:  # Allows helper tests and a useful CLI error on minimal Lin
     filedialog = messagebox = ttk = None
 
 
-PROJECT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = app_directory()
 CONFIG_PATH = PROJECT_DIR / "launcher_config.json"
 SAVE_NAME_PATTERN = re.compile(r"^\d{3}\.GM\d$", re.IGNORECASE)
 OUTPUT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_. -]*$")
@@ -79,7 +81,6 @@ class AnalyzerLauncher:
         self.dirty = False
         self.changed_at = 0.0
         self.last_signature: tuple[tuple[str, int, int], ...] = ()
-        self.dashboard_opened = False
 
         self.path_var = tk.StringVar(value=default_savegame_directory())
         self.output_var = tk.StringVar(value="live_game")
@@ -210,7 +211,6 @@ class AnalyzerLauncher:
         self.last_signature = save_directory_signature(self.directory)
         self.monitoring = self.live_var.get()
         self.dirty = False
-        self.dashboard_opened = False
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self._append_log(f"Watching: {self.directory}\n")
@@ -223,10 +223,7 @@ class AnalyzerLauncher:
         self.processing = True
         self.dirty = False
         self.status_var.set("Processing save files…")
-        command = [
-            sys.executable,
-            "-u",
-            str(PROJECT_DIR / "read_save.py"),
+        command = worker_command("process-saves", "read_save.py") + [
             str(self.directory),
             "--output",
             self.output_name,
@@ -277,10 +274,7 @@ class AnalyzerLauncher:
     def _restart_dashboard(self) -> None:
         self._terminate(self.dashboard_process)
         output_dir = PROJECT_DIR / "processed_games" / self.output_name
-        command = [
-            sys.executable,
-            "-u",
-            str(PROJECT_DIR / "dashboard.py"),
+        command = worker_command("dashboard", "dashboard.py") + [
             str(output_dir),
             "--port",
             str(self.port),
@@ -317,7 +311,7 @@ class AnalyzerLauncher:
                 break
             try:
                 with urllib.request.urlopen(url, timeout=0.5):
-                    self.events.put(("dashboard_ready", url))
+                    self.events.put(("dashboard_ready",))
                     return
             except Exception:
                 time.sleep(0.25)
@@ -330,7 +324,6 @@ class AnalyzerLauncher:
 
     def open_dashboard(self) -> None:
         webbrowser.open(self.dashboard_url)
-        self.dashboard_opened = True
 
     def _poll_directory(self) -> None:
         if self.monitoring:
@@ -372,9 +365,6 @@ class AnalyzerLauncher:
                     "Dashboard is running"
                     + (" and monitoring saves." if self.monitoring else ".")
                 )
-                if not self.dashboard_opened:
-                    webbrowser.open(event[1])
-                    self.dashboard_opened = True
             elif kind == "dashboard_failed":
                 if self.active:
                     self.status_var.set("Dashboard did not become ready. See the log.")
@@ -415,6 +405,20 @@ class AnalyzerLauncher:
 
 
 def main() -> None:
+    if getattr(sys, "frozen", False) and len(sys.argv) > 1:
+        worker = sys.argv[1]
+        if worker == "--worker-process-saves":
+            sys.argv.pop(1)
+            from read_save import main as process_saves
+
+            process_saves()
+            return
+        if worker == "--worker-dashboard":
+            sys.argv.pop(1)
+            from dashboard import main as run_dashboard
+
+            run_dashboard()
+            return
     if tk is None:
         raise SystemExit(
             "The launcher needs tkinter. Install python3-tk (Linux) or use a "
