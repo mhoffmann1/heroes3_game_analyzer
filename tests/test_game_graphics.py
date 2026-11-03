@@ -13,7 +13,8 @@ from game_graphics import (LodArchive, TerrainRenderer, _candidate_start,
                            active_map_creatures,
                            creature_level,
                            decode_hota_terrain_tile, decode_object_def,
-                           decode_terrain_def, parse_map_bonuses, parse_map_creatures,
+                           decode_terrain_def, identify_obelisk_indices,
+                           parse_map_bonuses, parse_map_creatures, parse_map_obelisks,
                            parse_map_dragon_utopias,
                            parse_map_scenery,
                            parse_map_transports, parse_map_towns)
@@ -62,7 +63,7 @@ def simple_object_def():
 class FakeArchive:
     entries = {"TREE.DEF": True, "PORTAL.DEF": True, "CAVE.DEF": True,
                "UTOPIA.DEF": True, "ARENA.DEF": True, "LUCK.DEF": True,
-               "TOWN.DEF": True}
+               "TOWN.DEF": True, "WELL.DEF": True}
 
     def read(self, name):
         if name in self.entries:
@@ -196,6 +197,18 @@ class GameGraphicsTests(unittest.TestCase):
         self.assertEqual(overview.getpixel((4, 4)), (200, 30, 20))
         self.assertEqual(overview.getpixel((12, 4)), (21, 23, 29))
 
+    def test_mana_site_sprite_respects_fog(self):
+        well = {"x": 1, "y": 0, "level": 0, "name": "WELL.DEF",
+                "title": "Magic Well", "category": "Mana replenishment"}
+        renderer = TerrainRenderer(bytes(4 * 7), FakeArchive(), bonuses=[well])
+        self.assertEqual(renderer.sprite_objects, [(1, 0, 0, "WELL.DEF")])
+        covered = np.array([[[True, False], [False, False]]])
+        image = Image.open(io.BytesIO(renderer.render_png(covered, 0)))
+        self.assertEqual(image.getpixel((48, 16)), (21, 23, 29))
+        covered[0, 0, 1] = True
+        image = Image.open(io.BytesIO(renderer.render_png(covered, 0)))
+        self.assertEqual(image.getpixel((48, 16)), (200, 30, 20))
+
     def test_town_sprite_is_drawn_only_on_explored_tiles(self):
         town = {"x": 1, "y": 0, "level": 0, "name": "TOWN.DEF",
                 "object_class": 98, "subclass": 0}
@@ -299,6 +312,28 @@ class GameGraphicsTests(unittest.TestCase):
                           parse_map_bonuses(raw, 0, 2, 1)],
                          [(0, "Colosseum of the Magi", "Power or Knowledge +2")])
 
+    def test_finds_mana_sites_without_pinning_unrelated_hota_subtypes(self):
+        def template(name, object_class, subclass=0):
+            return (struct.pack("<I", len(name)) + name + bytes(16) +
+                    struct.pack("<II", object_class, subclass) + bytes(18))
+
+        definitions = [(b"AVXMAGS0.DEF", 48, 0), (b"AVXWELG0.DEF", 49, 0),
+                       (b"AVAMNBTW.DEF", 145, 3), (b"AVXMALTW.DEF", 146, 2),
+                       (b"AVXSBRL.DEF", 145, 1), (b"AVXOBS.DEF", 146, 1)]
+        raw = (bytes(3 * 3 * 7) + struct.pack("<I", len(definitions)) +
+               b"".join(template(*definition) for definition in definitions) +
+               struct.pack("<I", len(definitions)) +
+               b"".join(bytes((index % 3, index // 3, 0)) +
+                        struct.pack("<I", index) + bytes(5)
+                        for index in range(len(definitions))))
+        bonuses = parse_map_bonuses(raw, 0, 3, 1)
+        self.assertEqual([(item["title"], item["category"]) for item in bonuses], [
+            ("Magic Spring", "Mana replenishment"),
+            ("Magic Well", "Mana replenishment"),
+            ("Vial of Mana", "Mana replenishment"),
+            ("Altar of Mana", "Mana replenishment"),
+        ])
+
     def test_finds_dragon_utopia_after_variable_object_body(self):
         def template(name, object_class):
             return (struct.pack("<I", len(name)) + name + bytes(16) +
@@ -315,6 +350,30 @@ class GameGraphicsTests(unittest.TestCase):
         self.assertEqual([(item["x"], item["y"], item["title"], item["category"])
                           for item in utopias],
                          [(1, 0, "Dragon Utopia", "Dragon Utopia")])
+
+    def test_obelisk_anchors_use_save_tile_indices_even_when_tiles_are_shifted(self):
+        def template(name, object_class):
+            return (struct.pack("<I", len(name)) + name + bytes(16) +
+                    struct.pack("<II", object_class, 0) + bytes(18))
+
+        raw = (bytes(3 * 3 * 7) + struct.pack("<I", 2) +
+               template(b"TREE.DEF", 199) + template(b"OBELISK.DEF", 57) +
+               struct.pack("<I", 3) +
+               bytes((0, 0, 0)) + struct.pack("<I", 0) + bytes(5) +
+               bytes((1, 1, 0)) + struct.pack("<I", 1) + bytes(5) +
+               bytes((2, 1, 0)) + struct.pack("<I", 1) + bytes(5))
+        obelisks = parse_map_obelisks(raw, 0, 3, 1)
+        self.assertEqual([(item["x"], item["y"]) for item in obelisks], [(1, 1), (2, 1)])
+        tiles = [bytes(16) for _ in range(8)]
+        for tile_number, index in ((3, 1), (4, 0)):
+            tile = bytearray(tiles[tile_number])
+            tile[8], tile[14] = 57, index
+            tiles[tile_number] = bytes(tile)
+        indexed = identify_obelisk_indices(obelisks, tiles, 3, shift=1)
+        self.assertEqual([item["obelisk_index"] for item in indexed], [1, 0])
+        tiles[4] = tiles[3]
+        self.assertEqual([item["obelisk_index"] for item in
+                          identify_obelisk_indices(obelisks, tiles, 3, shift=1)], [None, None])
 
     def test_creature_names_and_current_save_presence(self):
         def template(name, creature_id):

@@ -53,6 +53,9 @@ def load_latest_players(directory):
                    "fog_of_war": player.get("fog_of_war", ""),
                    "hero_summary": [hero.get("name") for hero in player.get("heroes") or []
                                     if isinstance(hero, dict) and hero.get("name")],
+                   "hero_details": [hero for hero in player.get("heroes") or []
+                                    if isinstance(hero, dict) and hero.get("name")],
+                   "obelisk_data": entry.get("obelisks"),
                    "town_summary": [
                        {"town_name": town.get("name"), "coords": town.get("coords")}
                        for town in player.get("towns") or []
@@ -167,6 +170,7 @@ def create_app(directory, *, player, game_dir=None, graphics=True):
                                       transport_provider=(lambda: renderer.transports) if renderer else None,
                                       bonus_provider=(lambda: renderer.bonuses) if renderer else None,
                                       utopia_provider=(lambda: renderer.utopias) if renderer else None,
+                                      obelisk_provider=(lambda: getattr(renderer, "obelisks", [])) if renderer else None,
                                       creature_provider=creature_provider if renderer else None,
                                       default_player=player, data_provider=data.get,
                                       refresh_interval_ms=5000, lock_player=True),
