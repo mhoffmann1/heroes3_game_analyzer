@@ -1,5 +1,7 @@
 """Build the dashboard's player- and day-specific Fog of War figure."""
 
+from html import escape
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -35,6 +37,39 @@ def _hero_position(coords, size, levels):
     return (x, y, z) if 0 <= x < size and 0 <= y < size and 0 <= z < levels else None
 
 
+def _hero_hover_text(row, name, day, level, x, y):
+    """Describe the hero from the same saved turn as this map position."""
+    def stat(key):
+        value = pd.to_numeric(row.get(key), errors="coerce")
+        return str(int(value)) if pd.notna(value) and float(value).is_integer() else "?"
+
+    lines = [f"{escape(name)} · Day {day} · "
+             f"{'Surface' if level == 0 else 'Underground'} ({x}, {y})",
+             f"A: {stat('attack')}  D: {stat('defense')}  "
+             f"P: {stat('power')}  K: {stat('knowledge')}"]
+    army = row.get("army")
+    if not isinstance(army, (list, tuple)):
+        lines.append("Army: unavailable")
+    else:
+        totals = {}
+        for stack in army:
+            if not isinstance(stack, dict) or not isinstance(stack.get("name"), str):
+                continue
+            try:
+                count = int(stack.get("count", 0))
+            except (TypeError, ValueError):
+                continue
+            if count > 0:
+                unit = stack["name"].strip()
+                if unit:
+                    totals[unit] = totals.get(unit, 0) + count
+        lines.append("Army:")
+        lines.extend(f"{escape(unit)}: {count}" for unit, count in totals.items())
+        if not totals:
+            lines.append("Empty")
+    return "<br>".join(lines)
+
+
 def _hero_track_traces(heroes, player, selected_day, selected_heroes, colors,
                        mask, pixel_size, gap):
     if (heroes is None or not selected_heroes or
@@ -61,7 +96,7 @@ def _hero_track_traces(heroes, player, selected_day, selected_heroes, colors,
                 points.append(None)
                 continue
             x, y, z = position
-            points.append((int(row["day"]), x, y, z) if mask[z, y, x] else None)
+            points.append((int(row["day"]), x, y, z, row) if mask[z, y, x] else None)
         for level in range(levels):
             xs, ys, labels = [], [], []
             previous_day = None
@@ -70,7 +105,7 @@ def _hero_track_traces(heroes, player, selected_day, selected_heroes, colors,
                 if point is None or point[3] != level:
                     previous_day = None
                     continue
-                day, x, y, _ = point
+                day, x, y, _, row = point
                 if previous_day is not None and day != previous_day + 1:
                     xs.append(None)
                     ys.append(None)
@@ -81,8 +116,7 @@ def _hero_track_traces(heroes, player, selected_day, selected_heroes, colors,
                     labels.append(None)
                 xs.append(x_offset + x * pixel_size + pixel_size / 2)
                 ys.append(y * pixel_size + pixel_size / 2)
-                labels.append(f"{name} · Day {day} · "
-                              f"{'Surface' if level == 0 else 'Underground'} ({x}, {y})")
+                labels.append(_hero_hover_text(row, name, day, level, x, y))
                 previous_day = day
             if xs:
                 if any(xs[index - 1] is not None and xs[index] is not None

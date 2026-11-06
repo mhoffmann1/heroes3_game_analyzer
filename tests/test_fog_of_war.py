@@ -17,6 +17,46 @@ class SpyRenderer:
 
 
 class FogOfWarFigureTests(unittest.TestCase):
+    def test_hero_hover_uses_stats_and_army_from_each_saved_turn(self):
+        first = dashboard.create_hero_entry("Adele", {
+            "coords": {"x": 0, "y": 0, "z": 0},
+            "primary_skills": {"attack": 1, "defense": 2,
+                               "spell_power": 3, "knowledge": 4},
+            "army": [{"name": "Pikeman", "count": 10},
+                     {"name": "Pikeman", "count": 5},
+                     {"name": "Archer", "count": 7}],
+        }, "Red", 1)
+        second = dashboard.create_hero_entry("Adele", {
+            "coords": {"x": 1, "y": 0, "z": 0},
+            "primary_skills": {"attack": 5, "defense": 6,
+                               "spell_power": 7, "knowledge": 8},
+            "army": [{"name": "<Archangel>", "count": 2}],
+        }, "Red", 2)
+        self.assertEqual(first["army"], [{"name": "Pikeman", "count": 10},
+                                           {"name": "Pikeman", "count": 5},
+                                           {"name": "Archer", "count": 7}])
+        heroes = pd.DataFrame([first, second])
+        figure = fog_of_war_figure("Red", 2, "1111", [], None, 2, 1,
+                                   "#ff0000", hero_history=heroes,
+                                   selected_heroes=["Adele"])
+        track = next(trace for trace in figure.data
+                     if getattr(trace, "mode", None) == "lines+markers")
+        self.assertIn("Adele · Day 1 · Surface (0, 0)", track.text[0])
+        self.assertIn("A: 1  D: 2  P: 3  K: 4", track.text[0])
+        self.assertIn("Pikeman: 15<br>Archer: 7", track.text[0])
+        self.assertNotIn("Archangel", track.text[0])
+        self.assertIn("Adele · Day 2 · Surface (1, 0)", track.text[1])
+        self.assertIn("A: 5  D: 6  P: 7  K: 8", track.text[1])
+        self.assertIn("&lt;Archangel&gt;: 2", track.text[1])
+        self.assertNotIn("Pikeman", track.text[1])
+        self.assertEqual(track.hovertemplate, "%{text}<extra></extra>")
+        earlier = fog_of_war_figure("Red", 1, "1111", [], None, 2, 1,
+                                    "#ff0000", hero_history=heroes,
+                                    selected_heroes=["Adele"])
+        earlier_track = next(trace for trace in earlier.data
+                             if getattr(trace, "mode", None) == "lines+markers")
+        self.assertEqual(len(earlier_track.text), 1)
+
     def test_hero_trails_follow_saved_days_without_crossing_levels_or_gaps(self):
         heroes = pd.DataFrame([
             {"player_color": "Red", "hero_name": "Adele", "day": 1,

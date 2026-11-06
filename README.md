@@ -104,6 +104,8 @@ same map level. Missing days and changes between Surface and Underground break
 the line. The lines show displacement between saves, not the route traveled
 during a turn; portals and Town Portal can make a line jump. The map expands to
 the dashboard width and scales its height with the map's aspect ratio.
+Hover over a hero marker to see that turn's location, A/D/P/K primary stats,
+and army stacks with their creature counts.
 When a matching map or assets are unavailable, the view falls back
 to its colored exploration grid. The terrain and scenery come from the original
 map, so changes to map objects during play may not appear. The standalone Map

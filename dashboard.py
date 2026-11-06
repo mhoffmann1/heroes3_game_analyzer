@@ -390,6 +390,8 @@ def create_hero_entry(hero_name, hero_data, player_color, day):
         "experience": hero_data.get("experience", 0),
         "army_strength": hero_data.get("army_strength", 0),
         "army_hitpoints": hero_data.get("army_hitpoints",0),
+        "army": [{"name": unit.get("name"), "count": unit.get("count")}
+                 for unit in hero_data.get("army", []) or [] if isinstance(unit, dict)],
         "attack": hero_data.get("primary_skills", {}).get("attack", 0),
         "defense": hero_data.get("primary_skills", {}).get("defense", 0),
         "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
