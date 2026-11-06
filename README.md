@@ -152,19 +152,19 @@ and pointed at the **raw savegame directory**. The launcher processes each new
 save into `processed_games/YOUR_GAME`; Map Helper checks that processed data
 every five seconds. Running Map Helper alone does not process new saves. A
 matching original map and local game assets enable terrain graphics and
-automatic pins for transports, stat, morale/luck, and mana sites, Dragon Utopias, Obelisks, and
+automatic pins for transports, stat, level, morale/luck, and mana sites, Dragon Utopias, Obelisks, and
 creature stacks still present in the latest processed save, with level 1–7
 subgroups inside one Creature category.
 Creature markers can be added to a separate gold **Favourites** category. Enter
 optional stack size and total joining gold there; the sidebar sums entered
 gold amounts and drops favourites when their stacks disappear from the save.
-The rendered map also shows game sprites for discovered towns, Obelisks, Stat increase
-sites, and mana sites.
+The rendered map also shows game sprites for discovered towns, Obelisks, stat sites,
+Trees of Knowledge, and mana sites.
 Town pins come from processed saves. Covered tiles stay hidden.
-For stat sites, choose a hero, mark sites that hero has visited, and optionally
+For stat sites and Trees of Knowledge, choose a hero, mark sites that hero has visited, and optionally
 hide marked sites on the map. These visit marks are saved in the processed game;
-the current save extraction does not identify per-hero stat-site visits.
-Clicking a stat-site marker toggles its visit for the selected hero. Selecting a
+the current save extraction does not identify per-hero site visits.
+Clicking a stat-site or Tree marker toggles its visit for the selected hero. Selecting a
 pin keeps the map viewport; **Show selected on map** centers it on demand.
 The selected hero's panel shows current primary stats, possible per-stat maxima
 from discovered unmarked sites, and visited percentages for each site type.

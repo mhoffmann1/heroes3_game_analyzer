@@ -334,6 +334,27 @@ class GameGraphicsTests(unittest.TestCase):
             ("Altar of Mana", "Mana replenishment"),
         ])
 
+    def test_finds_tree_of_knowledge_variants_as_level_increase_sites(self):
+        def template(name, object_class):
+            return (struct.pack("<I", len(name)) + name + bytes(16) +
+                    struct.pack("<II", object_class, 0) + bytes(18))
+
+        definitions = [(b"AVXTREK0.DEF", 102), (b"AVXTRKS0.DEF", 102),
+                       (b"AVTCAVE0.DEF", 103)]
+        raw = (bytes(3 * 3 * 7) + struct.pack("<I", len(definitions)) +
+               b"".join(template(*definition) for definition in definitions) +
+               struct.pack("<I", len(definitions)) +
+               b"".join(bytes((index, 0, 0)) + struct.pack("<I", index) + bytes(5)
+                        for index in range(len(definitions))))
+        sites = parse_map_bonuses(raw, 0, 3, 1)
+        self.assertEqual([(item["x"], item["title"], item["category"]) for item in sites],
+                         [(0, "Tree of Knowledge", "Level increase"),
+                          (1, "Tree of Knowledge", "Level increase")])
+        self.assertTrue(all("+1 hero level" in item["notes"] for item in sites))
+        renderer = TerrainRenderer(bytes(3 * 3 * 7), FakeArchive(), bonuses=sites)
+        self.assertIn((0, 0, 0, "AVXTREK0.DEF"), renderer.sprite_objects)
+        self.assertIn((1, 0, 0, "AVXTRKS0.DEF"), renderer.sprite_objects)
+
     def test_finds_dragon_utopia_after_variable_object_body(self):
         def template(name, object_class):
             return (struct.pack("<I", len(name)) + name + bytes(16) +

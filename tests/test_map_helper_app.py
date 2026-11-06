@@ -282,7 +282,9 @@ class StandaloneMapHelperTests(unittest.TestCase):
             class FakeRenderer:
                 transports = []
                 bonuses = [{"level": 0, "x": 1, "y": 0, "title": "Arena",
-                            "category": "Stat increase"}]
+                            "category": "Stat increase"},
+                           {"level": 0, "x": 0, "y": 1, "title": "Tree of Knowledge",
+                            "category": "Level increase"}]
                 utopias = []
 
                 def render_data_url(self, mask, level):
@@ -303,7 +305,7 @@ class StandaloneMapHelperTests(unittest.TestCase):
                     "inputs": [{"id": "map_stat_visit_toggle", "property": "n_clicks", "value": 1},
                                {"id": "map_stat_unvisit", "property": "n_clicks", "value": 1},
                                {"id": "map_helper_graph", "property": "clickData",
-                                "value": {"points": [{"customdata": selected["id"]}]}
+                                "value": {"points": [{"customdata": site["id"]}]}
                                 if use_map else None}],
                     "state": [{"id": "map_selected", "property": "data", "value": site},
                               {"id": "map_stat_hero", "property": "value", "value": hero},
@@ -344,7 +346,7 @@ class StandaloneMapHelperTests(unittest.TestCase):
             self.assertEqual(target_status("Dracon"), "Arena · Dracon: visited")
             self.assertIn("Select a discovered", target_status("Aislinn", None))
             self.assertIn("Choose a hero", target_status(None))
-            self.assertIn("Select a discovered stat site",
+            self.assertIn("Select a discovered stat or level site",
                           toggle("Aislinn", 3, site=None)["map_stat_message"]["children"])
 
             pattern = {"pin_id": ["ALL"], "type": "map_pin_button"}
@@ -420,6 +422,20 @@ class StandaloneMapHelperTests(unittest.TestCase):
             area_button = json.dumps({"site": selected["id"], "type": "map_interest_area"},
                                      separators=(",", ":")) + ".n_clicks"
             self.assertTrue(select(area_button, from_list, area_click=True)["focus"])
+
+            tree = {"id": "auto:0:0:1:Level increase", "player": "Blue", "level": 0,
+                    "x": 0, "y": 1, "title": "Tree of Knowledge",
+                    "category": "Level increase", "automatic": True}
+            self.assertIn("visited", toggle("Aislinn", 3, use_map=True, site=tree)
+                          ["map_stat_message"]["children"])
+            self.assertEqual(target_status("Aislinn", tree),
+                             "Tree of Knowledge · Aislinn: visited")
+            self.assertEqual(target_status("Dracon", tree),
+                             "Tree of Knowledge · Dracon: unvisited")
+            self.assertIn("unvisited", toggle("Aislinn", 4, unvisit=True, site=tree)
+                          ["map_stat_message"]["children"])
+            self.assertEqual(target_status("Aislinn", tree),
+                             "Tree of Knowledge · Aislinn: unvisited")
 
     def test_category_toggle_updates_session_visibility(self):
         with tempfile.TemporaryDirectory() as directory:

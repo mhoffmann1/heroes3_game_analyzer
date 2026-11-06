@@ -20,6 +20,7 @@ CATEGORY_COLORS = {
     "Artifact": "#E6AD00",
     "Joining units": "#00BE8A",
     "Stat increase": "#F24589",
+    "Level increase": "#27A54B",
     "Mana replenishment": "#04C7DD",
     "Dragon Utopia": "#F04D45",
     "Obelisk": "#547A39",
@@ -32,7 +33,8 @@ CATEGORY_COLORS = {
     "Other": "#A0AAB5",
 }
 CATEGORIES = [category for category in CATEGORY_COLORS
-              if category not in ("Portal", "Dragon Utopia", "Obelisk", "Morale and Luck",
+              if category not in ("Portal", "Dragon Utopia", "Obelisk", "Level increase",
+                                  "Morale and Luck",
                                   "Mana replenishment", "Town", "Underground gate",
                                   "Creature", "Favourites")]
 CREATURE_LEVEL_KEYS = tuple(f"Creature level {level}" for level in range(1, 8))
@@ -41,6 +43,7 @@ _PIN_LOCK = threading.Lock()
 _STAT_VISIT_LOCK = threading.Lock()
 _FAVOURITES_LOCK = threading.RLock()
 PRIMARY_STATS = ("Attack", "Defense", "Power", "Knowledge")
+HERO_VISIT_CATEGORIES = ("Stat increase", "Level increase")
 STAT_FIELDS = dict(zip(PRIMARY_STATS, ("attack", "defense", "spell_power", "knowledge")))
 # Choice sites contribute to each possible stat's individual ceiling. These
 # ceilings cannot necessarily all be reached by the same set of choices.
@@ -99,7 +102,7 @@ def visited_stat_sites(visits, player, hero):
 
 
 def stat_site_progress(hero, pins, visited):
-    """Summarize discovered stat sites and each primary stat's possible ceiling."""
+    """Summarize visitable sites and each primary stat's possible ceiling."""
     skills = hero.get("primary_skills") or {}
     current = {stat: skills.get(field) if isinstance(skills.get(field), int)
                and not isinstance(skills.get(field), bool) else None
@@ -108,7 +111,7 @@ def stat_site_progress(hero, pins, visited):
     by_type = defaultdict(lambda: {"visited": 0, "total": 0})
     seen = set()
     for pin in pins:
-        if pin.get("category") != "Stat increase" or not pin.get("automatic"):
+        if pin.get("category") not in HERO_VISIT_CATEGORIES or not pin.get("automatic"):
             continue
         site = stat_site_key(pin)
         if site in seen:
@@ -119,7 +122,7 @@ def stat_site_progress(hero, pins, visited):
         counts["total"] += 1
         if site in visited:
             counts["visited"] += 1
-        else:
+        elif pin["category"] == "Stat increase":
             for stat, bonus in STAT_SITE_BONUSES.get(title, {}).items():
                 if potential[stat] is not None:
                     potential[stat] += bonus
@@ -360,14 +363,14 @@ def visible_obelisk_pins(obelisks, mask, player, obelisk_data=None):
 
 
 def clicked_stat_pin(point, pins, level):
-    """Find the stat site under a clicked pin marker or rendered map tile."""
+    """Find a hero-visitable site under a marker or rendered map tile."""
     if not isinstance(point, dict):
         return None
     pin_id = point.get("customdata")
     if pin_id:
         return next((pin for pin in pins if pin.get("id") == pin_id
                      and pin.get("level") == level and pin.get("automatic")
-                     and pin.get("category") == "Stat increase"), None)
+                     and pin.get("category") in HERO_VISIT_CATEGORIES), None)
     if point.get("curveNumber") != 0:
         return None
     try:
@@ -376,21 +379,20 @@ def clicked_stat_pin(point, pins, level):
         return None
     return next((pin for pin in pins if pin.get("level") == level
                  and pin.get("x") == x and pin.get("y") == y
-                 and pin.get("automatic") and pin.get("category") == "Stat increase"), None)
+                 and pin.get("automatic")
+                 and pin.get("category") in HERO_VISIT_CATEGORIES), None)
 
 
 def selected_stat_pin(selected, pins):
-    """Resolve a selected marker or its exact tile to a current automatic site."""
+    """Resolve a selected marker or its exact tile to a current automatic visit site."""
     if not isinstance(selected, dict):
         return None
     sites = [pin for pin in pins if pin.get("automatic")
-             and pin.get("category") == "Stat increase"
+             and pin.get("category") in HERO_VISIT_CATEGORIES
              and pin.get("player") == selected.get("player")]
     pin_id = selected.get("id")
     if pin_id:
-        match = next((pin for pin in sites if pin.get("id") == pin_id), None)
-        if match:
-            return match
+        return next((pin for pin in sites if pin.get("id") == pin_id), None)
     return next((pin for pin in sites if pin.get("level") == selected.get("level")
                  and pin.get("x") == selected.get("x")
                  and pin.get("y") == selected.get("y")), None)
@@ -532,7 +534,7 @@ def grouped_pin_list(pins, hidden_categories=None, visited_stats=None, hero=None
                 f"({pin['x']}/{pin['y']})" +
                 (f" · {pin['visit_status']}" if pin.get("category") == "Obelisk" else "") +
                 (f" · Visited by {hero}" if hero and pin.get("automatic")
-                 and pin.get("category") == "Stat increase"
+                 and pin.get("category") in HERO_VISIT_CATEGORIES
                  and stat_site_key(pin) in visited_stats else ""),
                 id={"type": "map_pin_button", "pin_id": pin["id"]},
                 n_clicks=0,
@@ -705,7 +707,7 @@ def map_figure(mask, day, player, level, pins, selected=None, background=None, t
                and not (p.get("category") == "Creature"
                         and creature_level_key(p) in hidden_categories)
                and not (hide_visited_stats and p.get("automatic")
-                        and p.get("category") == "Stat increase"
+                        and p.get("category") in HERO_VISIT_CATEGORIES
                         and stat_site_key(p) in visited_stats)
                and is_explored(mask, level, p.get("x", -1), p.get("y", -1))]
     if visible:
@@ -715,7 +717,7 @@ def map_figure(mask, day, player, level, pins, selected=None, background=None, t
             marker={"size": 17, "color": [CATEGORY_COLORS.get(p.get("category"), CATEGORY_COLORS["Other"])
                                            for p in visible],
                     "symbol": ["circle-open" if p.get("automatic")
-                               and ((p.get("category") == "Stat increase"
+                               and ((p.get("category") in HERO_VISIT_CATEGORIES
                                      and stat_site_key(p) in visited_stats)
                                     or (p.get("category") == "Obelisk"
                                         and p.get("visit_status") == "Visited"))
@@ -728,7 +730,7 @@ def map_figure(mask, day, player, level, pins, selected=None, background=None, t
                     if p["visit_status"] != "Unknown" else " · Visit status unknown")
                    if p.get("category") == "Obelisk" else '') +
                   (' · Visited by selected hero' if p.get("automatic")
-                   and p.get("category") == "Stat increase"
+                   and p.get("category") in HERO_VISIT_CATEGORIES
                    and stat_site_key(p) in visited_stats else '') for p in visible],
             hovertemplate="%{text}<br>(%{x}, %{y})<extra></extra>",
         ))
@@ -926,7 +928,7 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
                         style={"minWidth": "150px", "flex": "1"}),
                 ], style={"display": "flex", "gap": "12px", "flexWrap": "wrap"}),
                 html.Div([
-                    html.Label("Track stat visits for hero"),
+                    html.Label("Track site visits for hero"),
                     dcc.Dropdown(id="map_stat_hero", options=initial_heroes,
                                  value=initial_heroes[0] if initial_heroes else None,
                                  placeholder="Select a hero", clearable=True),
@@ -936,7 +938,7 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
                                   value=[], persistence=True, persistence_type="session",
                                   style={"marginTop": "7px"}),
                     html.Div("Visits are marked by you; the processed saves do not record "
-                             "which hero visited each stat site.",
+                             "which hero visited each stat or level site.",
                              style={"fontSize": "12px", "opacity": 0.8}),
                 ], style={"maxWidth": "430px", "marginTop": "10px"}),
                 html.Div(id="map_stat_overview", style={"marginTop": "12px"}),
@@ -1045,7 +1047,9 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
                     f"{counts['visited']}/{counts['total']} ({percent}%)")],
                     style={"display": "flex", "justifyContent": "space-between", "gap": "8px"}),
                 html.Div(html.Div(style={"height": "100%", "width": f"{percent}%",
-                                         "background": CATEGORY_COLORS["Stat increase"],
+                                         "background": CATEGORY_COLORS[
+                                             "Level increase" if title == "Tree of Knowledge"
+                                             else "Stat increase"],
                                          "borderRadius": "4px"}),
                          role="progressbar", **{"aria-valuenow": percent,
                                                  "aria-valuemin": 0, "aria-valuemax": 100,
@@ -1058,9 +1062,9 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
             html.Div("Current → possible max from discovered, unmarked sites",
                      style={"fontSize": "12px", "marginBottom": "8px"}),
             html.Div(cards, style={"display": "flex", "gap": "8px", "flexWrap": "wrap"}),
-            html.H4("Visited stat sites by type", style={"margin": "12px 0 6px"}),
+            html.H4("Visited sites by type", style={"margin": "12px 0 6px"}),
             html.Div(progress, style={"display": "flex", "gap": "10px 16px", "flexWrap": "wrap"})
-            if progress else html.Div("No discovered stat sites yet."),
+            if progress else html.Div("No discovered stat or level sites yet."),
             html.Div("Choice-site ceilings are separate estimates; level requirements and fees "
                      "are not checked. Unmarked visits are treated as available.",
                      style={"fontSize": "12px", "opacity": 0.8, "marginTop": "8px"}),
@@ -1282,12 +1286,12 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
     def stat_visit_target(selected, hero, _revision, player):
         player = active_player(player)
         if not hero:
-            return "Choose a hero, then select a discovered Stat increase site."
+            return "Choose a hero, then select a discovered Stat increase or Level increase site."
         rows, _ = current_data()
         mask = latest_fog(rows, player, size, levels)[1]
         site = selected_stat_pin(selected, current_pins(player, mask))
         if site is None:
-            return "Select a discovered Stat increase site to change its visit status."
+            return "Select a discovered Stat increase or Level increase site to change its visit status."
         visited = stat_site_key(site) in visited_stat_sites(
             read_stat_visits(stat_visits_path), player, hero)
         return f"{site['title']} · {hero}: {'visited' if visited else 'unvisited'}"
@@ -1313,7 +1317,7 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
                 return no_update, no_update
         site_pin = selected_stat_pin(selected, pins)
         if not hero or hero not in hero_names(rows, player) or site_pin is None:
-            return no_update, "Select a discovered stat site and a current hero."
+            return no_update, "Select a discovered stat or level site and a current hero."
         site = stat_site_key(site_pin)
         with _STAT_VISIT_LOCK:
             visits = read_stat_visits(stat_visits_path)

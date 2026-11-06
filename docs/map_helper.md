@@ -74,20 +74,21 @@ pins still come from the processed saves. Run
 - Open **Creature** to see level 1–7 subcategories. Each level has its own
   **Show on map** checkbox, so you can hide one level while keeping the others.
   All creature pins use the same color.
-- Choose a hero in **Track stat visits for hero**. Click a discovered automatic
-  stat-site marker on the map to toggle its visited status immediately. You can
-  also select it from **Stat increase** and use the separate **Mark visited**
+- Choose a hero in **Track site visits for hero**. Click a discovered automatic
+  **Stat increase** or **Level increase** marker on the map to toggle its visited
+  status immediately. You can also select it from either category and use the **Mark visited**
   or **Mark unvisited** button below the list. A status line names the target
-  site and shows whether that hero has marked it visited. If no stat site is
+  site and shows whether that hero has marked it visited. If no eligible site is
   selected, the buttons explain what to select. Marked sites have an open-circle pin and a visited label in the
   list. **Hide objects already visited by this hero** removes those pins from
   the map while leaving them in the list so you can select and unmark them.
-  Changing heroes shows that hero's own marked visits. Manual Stat increase
-  pins cannot be marked visited.
+  Changing heroes shows that hero's own marked visits. Manual pins cannot be
+  marked visited.
 - The selected hero's **Primary stats** panel shows current values from the
   latest processed save and a possible maximum from discovered automatic stat
-  sites still unmarked for that hero. **Visited stat sites by type** shows
-  visited/known counts and percentage bars. Both update after a visit is
+  sites still unmarked for that hero. **Visited sites by type** shows
+  visited/known counts and percentage bars for stat sites and Trees of Knowledge.
+  Trees do not add to the primary-stat maximum. Both update after a visit is
   marked or new processed save data is loaded. Sites offering a choice count
   toward each eligible stat's individual maximum; those maxima cannot all
   necessarily be reached together. Level requirements and fees are not
@@ -141,6 +142,7 @@ chosen player:
 | Town | Towns in processed saves, including discovered neutral and rival towns |
 | Portal, Underground gate | Monoliths, portals, and gates in the matched map; portal names include their color |
 | Stat increase | Primary-stat visit sites, including Colosseum of the Magi and specified primary-stat Scholars |
+| Level increase | Tree of Knowledge sites that grant one hero level, sometimes for gold or gems |
 | Morale and Luck | Visit sites that affect morale, luck, or both; each pin's notes identify its effect |
 | Mana replenishment | Magic Wells, Magic Springs, HotA Vials of Mana, and Altars of Mana from the matched map |
 | Dragon Utopia | Dragon Utopia locations in the matched map |
@@ -148,7 +150,7 @@ chosen player:
 | Creature | Neutral creature stacks still present in the latest processed save; nested level 1–7 groups contain base and upgraded creatures of the same level |
 | Favourites | Creature stacks marked by the user, with gold markers and optional quantity and joining cost |
 
-When map graphics are available, towns, Dragon Utopias, Obelisks, Stat increase sites,
+When map graphics are available, towns, Dragon Utopias, Obelisks, Stat increase sites, Level increase sites,
 and mana sites
 also appear with their game sprites on the rendered terrain. Town sprites are
 matched against the towns in the latest save; their name pins still come from
@@ -182,7 +184,7 @@ They are separate for each player and survive app restarts. Automatic pins are
 generated from the latest data and are not saved in that file.
 Creature favourites and their entered details are stored per player in
 `map_creature_favourites.json` in the same directory.
-Hero stat-site visits are stored separately in `map_stat_visits.json` in the
+Hero stat-site and Tree of Knowledge visits are stored in `map_stat_visits.json` in the
 same directory. These are **user-confirmed marks**: the processed saves do not
 contain a reliable per-hero visit history. An unmarked site means its visit
 status is unknown, not that the hero definitely has not visited it. New heroes

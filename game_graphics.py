@@ -60,6 +60,7 @@ BONUS_OBJECTS = {
     61: ("Star Axis", "Stat increase", "Power +1"),
     64: ("Rally Flag", "Morale and Luck", "Morale and luck bonus"),
     96: ("Temple", "Morale and Luck", "Morale bonus"),
+    102: ("Tree of Knowledge", "Level increase", "+1 hero level; may require gold or gems"),
     107: ("School of War", "Stat increase", "Attack or Defense +1, fee"),
     110: ("Watering Hole", "Morale and Luck", "Morale bonus"),
 }
@@ -421,7 +422,7 @@ def parse_map_towns(raw, terrain_start, size, levels, town_anchors):
 
 
 def parse_map_bonuses(raw, terrain_start, size, levels):
-    """Locate stat, morale, luck and mana visit sites in the matched map."""
+    """Locate stat, level, morale, luck and mana visit sites in the matched map."""
     templates, start = _map_object_templates(raw, terrain_start, size, levels)
     result = [{**item, "title": BONUS_OBJECTS[item["object_class"]][0],
                "category": BONUS_OBJECTS[item["object_class"]][1],
@@ -667,7 +668,8 @@ class TerrainRenderer:
         self.creatures = creatures or []
         rendered_objects = (self.transports + self.towns + self.utopias + self.obelisks +
                             [item for item in self.bonuses
-                             if item.get("category") in ("Stat increase", "Mana replenishment")])
+                             if item.get("category") in ("Stat increase", "Level increase",
+                                                         "Mana replenishment")])
         self.sprite_objects = sorted(
             set(self.scenery) | {(item["x"], item["y"], item["level"], item["name"])
                                  for item in rendered_objects},

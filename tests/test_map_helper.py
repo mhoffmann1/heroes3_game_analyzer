@@ -15,7 +15,8 @@ from map_helper import (CATEGORIES, CATEGORY_COLORS, active_creature_favourites,
                         visible_bonus_pins, visible_obelisk_pins,
                         visible_transport_pins, visible_utopia_pins,
                         visible_creature_pins, read_stat_visits, stat_site_key,
-                        stat_site_progress, visited_stat_sites, write_pins, write_stat_visits)
+                        stat_site_progress, selected_stat_pin, visited_stat_sites,
+                        write_pins, write_stat_visits)
 
 
 class MapHelperTests(unittest.TestCase):
@@ -123,10 +124,14 @@ class MapHelperTests(unittest.TestCase):
     def test_clicked_stat_site_accepts_marker_or_terrain_tile(self):
         pins = [{"id": "stat", "level": 0, "x": 2, "y": 3, "automatic": True,
                  "category": "Stat increase"},
+                {"id": "tree", "level": 0, "x": 4, "y": 3, "automatic": True,
+                 "category": "Level increase"},
                 {"id": "other", "level": 0, "x": 2, "y": 3, "automatic": True,
                  "category": "Portal"}]
         self.assertEqual(clicked_stat_pin({"customdata": "stat", "curveNumber": 1}, pins, 0), pins[0])
         self.assertEqual(clicked_stat_pin({"x": 2, "y": 3, "curveNumber": 0}, pins, 0), pins[0])
+        self.assertEqual(clicked_stat_pin({"customdata": "tree", "curveNumber": 1}, pins, 0), pins[1])
+        self.assertEqual(clicked_stat_pin({"x": 4, "y": 3, "curveNumber": 0}, pins, 0), pins[1])
         self.assertIsNone(clicked_stat_pin({"customdata": "other", "x": 2, "y": 3,
                                             "curveNumber": 1}, pins, 0))
         self.assertIsNone(clicked_stat_pin({"x": 2, "y": 3, "curveNumber": 0}, pins, 1))
@@ -173,6 +178,32 @@ class MapHelperTests(unittest.TestCase):
         self.assertEqual(list(map_figure(mask, 1, "Blue", 0, pins,
                                          visited_stats=dracon,
                                          hide_visited_stats=True).data[1].x), [0, 1])
+
+    def test_tree_visits_are_per_hero_and_do_not_raise_primary_stat_ceiling(self):
+        mask = np.ones((1, 2, 2), dtype=bool)
+        pins = visible_bonus_pins([
+            {"level": 0, "x": 0, "y": 0, "title": "Tree of Knowledge",
+             "category": "Level increase"},
+            {"level": 0, "x": 1, "y": 0, "title": "Arena",
+             "category": "Stat increase"},
+        ], mask, "Blue")
+        hero = {"primary_skills": {"attack": 4, "defense": 3,
+                                   "spell_power": 2, "knowledge": 1}}
+        current, potential, progress = stat_site_progress(hero, pins, {"0:0:0"})
+        self.assertEqual(progress["Tree of Knowledge"], {"visited": 1, "total": 1})
+        self.assertEqual(potential, {"Attack": 6, "Defense": 5, "Power": 2,
+                                     "Knowledge": 1})
+        self.assertEqual(stat_site_progress(hero, pins, set())[1], potential)
+        self.assertEqual(list(map_figure(mask, 1, "Blue", 0, pins,
+                                         visited_stats={"0:0:0"}).data[1].marker.symbol),
+                         ["circle-open", "diamond"])
+        self.assertEqual(list(map_figure(mask, 1, "Blue", 0, pins,
+                                         visited_stats={"0:0:0"},
+                                         hide_visited_stats=True).data[1].x), [1])
+        self.assertIn("Visited by Aislinn", str(grouped_pin_list(
+            pins, visited_stats={"0:0:0"}, hero="Aislinn")))
+        self.assertIsNone(selected_stat_pin(
+            {"id": "manual", "player": "Blue", "level": 0, "x": 0, "y": 0}, pins))
 
     def setUp(self):
         self.players = pd.DataFrame([
@@ -324,7 +355,7 @@ class MapHelperTests(unittest.TestCase):
 
     def test_auto_marker_types_cannot_be_added_manually(self):
         mask = np.array([[[True]]])
-        for category in ("Portal", "Dragon Utopia", "Morale", "Luck", "Morale and luck",
+        for category in ("Portal", "Dragon Utopia", "Level increase", "Morale", "Luck", "Morale and luck",
                          "Morale and Luck", "Mana replenishment",
                          "Town", "Underground gate", "Creature level 1",
                          "Creature level 7"):
@@ -377,6 +408,20 @@ class MapHelperTests(unittest.TestCase):
                          ["Faerie Ring"])
         self.assertEqual(visible_bonus_pins(sites, ~mask, "Blue")[0]["category"],
                          "Morale and Luck")
+
+    def test_tree_of_knowledge_pins_follow_exploration_and_avoid_stat_progress(self):
+        sites = [{"level": 0, "x": 0, "y": 0, "title": "Tree of Knowledge",
+                  "category": "Level increase", "notes": "+1 hero level"},
+                 {"level": 0, "x": 1, "y": 0, "title": "Tree of Knowledge",
+                  "category": "Level increase", "notes": "+1 hero level"}]
+        mask = np.array([[[True, False]]])
+        pins = visible_bonus_pins(sites, mask, "Blue")
+        self.assertEqual(len(pins), 1)
+        self.assertEqual(pins[0]["category"], "Level increase")
+        self.assertEqual(pins[0]["notes"], "+1 hero level")
+        self.assertEqual(list(map_figure(mask, 2, "Blue", 0, pins).data[1].marker.color),
+                         [CATEGORY_COLORS["Level increase"]])
+        self.assertIn("Level increase (1)", str(grouped_pin_list(pins)[0].children[0].children))
 
     def test_mana_pins_follow_exploration_and_group_by_category(self):
         sites = [
