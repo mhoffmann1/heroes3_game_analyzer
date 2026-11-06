@@ -36,6 +36,7 @@ SCENERY_CLASSES = (set((0, 40, 124, 125, 139, 141, 142, 144, 145, 146,
                    | set(range(165, 175)) | set(range(177, 212)))
 TRANSPORT_CLASSES = {43, 44, 45, 103}
 TOWN_CLASSES = {77, 98}  # Random and specified towns.
+OBELISK_CLASS = 57
 # Fixed-effect visit sites. IDs are H3M object class IDs (not sprite IDs).
 # Variable rewards such as Pandora's Box cannot be inferred from their
 # template alone. Explicit primary-stat Scholars are read separately below.
@@ -51,19 +52,25 @@ BONUS_OBJECTS = {
     38: ("Idol of Fortune", "Morale and Luck", "Morale or luck, depending on day"),
     41: ("Library of Enlightenment", "Stat increase", "All primary stats +2, level requirement"),
     47: ("School of Magic", "Stat increase", "Power or Knowledge +1, fee"),
+    48: ("Magic Spring", "Mana replenishment", "Refills and doubles spell points; resets weekly"),
+    49: ("Magic Well", "Mana replenishment", "Refills spell points; once per hero each day"),
     51: ("Mercenary Camp", "Stat increase", "Attack +1"),
     52: ("Mermaid", "Morale and Luck", "Luck bonus"),
     56: ("Oasis", "Morale and Luck", "Morale bonus"),
     61: ("Star Axis", "Stat increase", "Power +1"),
     64: ("Rally Flag", "Morale and Luck", "Morale and luck bonus"),
     96: ("Temple", "Morale and Luck", "Morale bonus"),
+    102: ("Tree of Knowledge", "Level increase", "+1 hero level; may require gold or gems"),
     107: ("School of War", "Stat increase", "Attack or Defense +1, fee"),
     110: ("Watering Hole", "Morale and Luck", "Morale bonus"),
 }
-# HotA uses class 144 for several unrelated visit sites. Only subtype 2 is
-# the Colosseum of the Magi; other subtypes must not become stat pins.
+# HotA classes 144–146 contain unrelated objects. Match both class and subtype.
 HOTA_BONUS_OBJECTS = {
     (144, 2): ("Colosseum of the Magi", "Stat increase", "Power or Knowledge +2"),
+    (145, 3): ("Vial of Mana", "Mana replenishment",
+               "Grants 30–60 spell points; may already have been collected"),
+    (146, 2): ("Altar of Mana", "Mana replenishment",
+               "Sacrifice creatures for spell points"),
 }
 ONE_WAY_COLORS = {
     0: "Blue", 1: "Pink", 2: "Orange", 3: "Yellow", 4: "Purple",
@@ -415,13 +422,13 @@ def parse_map_towns(raw, terrain_start, size, levels, town_anchors):
 
 
 def parse_map_bonuses(raw, terrain_start, size, levels):
-    """Locate standard stat, morale and luck visit sites in the matched map."""
+    """Locate stat, level, morale, luck and mana visit sites in the matched map."""
     templates, start = _map_object_templates(raw, terrain_start, size, levels)
     result = [{**item, "title": BONUS_OBJECTS[item["object_class"]][0],
                "category": BONUS_OBJECTS[item["object_class"]][1],
                "notes": BONUS_OBJECTS[item["object_class"]][2]}
               for item in _find_template_objects(raw, start, templates, BONUS_OBJECTS, size, levels)]
-    for item in _find_template_objects(raw, start, templates, {144}, size, levels):
+    for item in _find_template_objects(raw, start, templates, {144, 145, 146}, size, levels):
         bonus = HOTA_BONUS_OBJECTS.get((item["object_class"], item["subclass"]))
         if bonus is not None:
             result.append({**item, "title": bonus[0], "category": bonus[1], "notes": bonus[2]})
@@ -456,6 +463,33 @@ def parse_map_dragon_utopias(raw, terrain_start, size, levels):
     return [{**item, "title": "Dragon Utopia", "category": "Dragon Utopia",
              "notes": "Location from the original map; cleared status unknown"}
             for item in _find_template_objects(raw, start, templates, {25}, size, levels)]
+
+
+def parse_map_obelisks(raw, terrain_start, size, levels):
+    """Locate Obelisk anchors in the matched original map."""
+    templates, start = _map_object_templates(raw, terrain_start, size, levels)
+    return [{**item, "title": "Obelisk", "category": "Obelisk"}
+            for item in _find_template_objects(raw, start, templates,
+                                               {OBELISK_CLASS}, size, levels)]
+
+
+def identify_obelisk_indices(obelisks, save_tiles, size, shift):
+    """Join H3M anchors to the save's Obelisk visit table via tile object IDs.
+
+    A shifted save tile stream starts at original map tile ``shift``. Only use
+    indices when every mapped tile identifies an Obelisk and the indices form
+    a complete permutation; otherwise individual visit status is unknown.
+    """
+    identified = []
+    for item in obelisks:
+        tile_number = item["level"] * size * size + item["y"] * size + item["x"] - shift
+        tile = save_tiles[tile_number] if 0 <= tile_number < len(save_tiles) else b""
+        index = tile[14] if len(tile) > 14 and tile[8] == OBELISK_CLASS else None
+        identified.append({**item, "obelisk_index": index})
+    if sorted(item["obelisk_index"] for item in identified
+              if item["obelisk_index"] is not None) != list(range(len(obelisks))):
+        return [{**item, "obelisk_index": None} for item in identified]
+    return identified
 
 
 def creature_level(creature_id):
@@ -599,6 +633,7 @@ def match_h3m(install_dir, save_tiles, size, levels, town_anchors=None):
                     towns = parse_map_towns(raw, start, size, levels, town_anchors or set())
                     bonuses = parse_map_bonuses(raw, start, size, levels)
                     utopias = parse_map_dragon_utopias(raw, start, size, levels)
+                    obelisks = parse_map_obelisks(raw, start, size, levels)
                     creatures = parse_map_creatures(raw, start, size, levels)
                 except (ValueError, IndexError, struct.error) as exc:
                     logger.warning("Could not read H3M scenery in %s: %s", path, exc)
@@ -607,9 +642,10 @@ def match_h3m(install_dir, save_tiles, size, levels, town_anchors=None):
                     towns = []
                     bonuses = []
                     utopias = []
+                    obelisks = []
                     creatures = []
                 return (path, raw[start:start + tile_count * 7], scenery, transports,
-                        towns, bonuses, utopias, creatures, shift)
+                        towns, bonuses, utopias, creatures, shift, obelisks)
         except (OSError, EOFError, ValueError, struct.error):
             continue
     return None
@@ -619,19 +655,21 @@ class TerrainRenderer:
     def __init__(self, terrain, archive, scenery=None, object_archives=None,
                  transports=None, hota_archive=None, bonuses=None, utopias=None,
                  creature_templates=None, creature_tile_shift=0, creatures=None,
-                 towns=None):
+                 towns=None, obelisks=None):
         self.terrain = terrain
         self.scenery = scenery or []
         self.transports = transports or []
         self.towns = towns or []
         self.bonuses = bonuses or []
         self.utopias = utopias or []
+        self.obelisks = obelisks or []
         self.creature_templates = creature_templates or []
         self.creature_tile_shift = creature_tile_shift
         self.creatures = creatures or []
-        rendered_objects = (self.transports + self.towns + self.utopias +
+        rendered_objects = (self.transports + self.towns + self.utopias + self.obelisks +
                             [item for item in self.bonuses
-                             if item.get("category") == "Stat increase"])
+                             if item.get("category") in ("Stat increase", "Level increase",
+                                                         "Mana replenishment")])
         self.sprite_objects = sorted(
             set(self.scenery) | {(item["x"], item["y"], item["level"], item["name"])
                                  for item in rendered_objects},
@@ -825,7 +863,9 @@ def load_terrain_renderer(processed_dir, size, levels, install_dir=None):
         match = match_h3m(root, save_tiles, size, levels, town_anchors)
         if match is None:
             return None, "No exact generated .h3m map matched the latest save."
-        map_path, terrain, scenery, transports, towns, bonuses, utopias, creature_templates, shift = match
+        (map_path, terrain, scenery, transports, towns, bonuses, utopias,
+         creature_templates, shift, obelisks) = match
+        obelisks = identify_obelisk_indices(obelisks, save_tiles, size, shift)
         creatures = active_map_creatures(save_tiles, creature_templates, shift, size, levels)
         archive = LodArchive(root / "Data" / "H3sprite.lod")
         object_archives = [archive]
@@ -844,7 +884,7 @@ def load_terrain_renderer(processed_dir, size, levels, install_dir=None):
                     logger.debug("Skipping unsupported sprite archive %s", path)
         return TerrainRenderer(terrain, archive, scenery, object_archives,
                                transports, hota_archive, bonuses, utopias,
-                               creature_templates, shift, creatures, towns), str(map_path)
+                               creature_templates, shift, creatures, towns, obelisks), str(map_path)
     except (OSError, ValueError, KeyError, IndexError, struct.error) as exc:
         logger.warning("Terrain graphics unavailable: %s", exc)
         return None, str(exc)
