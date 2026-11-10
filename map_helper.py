@@ -62,6 +62,7 @@ STAT_SITE_BONUSES = {
 STAT_AREA_VALUES = {"Library of Enlightenment": 3,
                     "Arena": 2, "Colosseum of the Magi": 2}
 STAT_AREA_MAX_SITES = 6
+MANUAL_VISIT_TITLES = {"Colosseum of the Magi"}
 
 
 def stat_site_key(pin):
@@ -99,6 +100,21 @@ def write_stat_visits(path, visits):
 def visited_stat_sites(visits, player, hero):
     return {item["site"] for item in visits
             if item["player"] == player and item["hero"] == hero}
+
+
+def manual_visit_site(pin):
+    """Sites without a matching per-hero visit mask remain user-tracked."""
+    title = pin.get("title", "")
+    return title in MANUAL_VISIT_TITLES or title.startswith("Scholar (")
+
+
+def resolved_hero_visits(visits, player, hero, pins, automatic_sites):
+    """Use save flags for standard sites and manual marks for unsupported sites."""
+    manual = visited_stat_sites(visits, player, hero)
+    if automatic_sites is None:
+        return manual
+    manual_sites = {stat_site_key(pin) for pin in pins if manual_visit_site(pin)}
+    return set(automatic_sites) | (manual & manual_sites)
 
 
 def stat_site_progress(hero, pins, visited):
@@ -811,7 +827,8 @@ def map_figure(mask, day, player, level, pins, selected=None, background=None, t
 def register_map_helper(app, df_players, game_info, input_dir, graphics_provider=None,
                         default_player=None, data_provider=None, refresh_interval_ms=None,
                         lock_player=False, transport_provider=None, bonus_provider=None,
-                        utopia_provider=None, creature_provider=None, obelisk_provider=None):
+                        utopia_provider=None, creature_provider=None, obelisk_provider=None,
+                        hero_visit_provider=None):
     size = int(game_info.get("map_size") or 0)
     levels = int(game_info.get("levels") or 1)
     path = Path(input_dir) / "map_pins.json"
@@ -843,6 +860,19 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
         details = matching.iloc[-1].get("hero_details")
         return next((item for item in details or [] if item.get("name") == name), None)
 
+    def automatic_sites(player, hero):
+        if not hero or not hero_visit_provider:
+            return None
+        players = hero_visit_provider()
+        return players.get(player, {}).get(hero) if players is not None else None
+
+    def hero_visits(player, hero):
+        if not hero:
+            return set()
+        bonuses = bonus_provider() if bonus_provider else []
+        return resolved_hero_visits(read_stat_visits(stat_visits_path), player, hero,
+                                    bonuses, automatic_sites(player, hero))
+
     def interest_data(rows, player, hero_name, mask):
         hero = selected_hero(rows, player, hero_name)
         position = hero_map_position(hero, size, levels)
@@ -850,7 +880,7 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
             return position, []
         bonuses = bonus_provider() if bonus_provider else []
         pins = visible_bonus_pins(bonuses, mask, player)
-        visited = visited_stat_sites(read_stat_visits(stat_visits_path), player, hero_name)
+        visited = hero_visits(player, hero_name)
         return position, stat_area_interests(pins, visited, position, size)
 
     players = available_players(df_players)
@@ -900,8 +930,8 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
 
     layout = html.Div([
         html.H2("Map Helper"),
-        html.P("Latest processed turn. Click an explored tile to add a pin or a stat-site marker "
-               "to toggle its visit for the selected hero. Drag to pan; scroll to zoom."),
+        html.P("Latest processed turn. Click an explored tile to add a pin. "
+               "Select a stat site to see the chosen hero's visit status. Drag to pan; scroll to zoom."),
         dcc.Interval(id="map_poll", interval=refresh_interval_ms or 5000,
                      disabled=refresh_interval_ms is None),
         dcc.Store(id="map_data_revision", data=0),
@@ -937,8 +967,8 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
                                             "value": "hide"}],
                                   value=[], persistence=True, persistence_type="session",
                                   style={"marginTop": "7px"}),
-                    html.Div("Visits are marked by you; the processed saves do not record "
-                             "which hero visited each stat or level site.",
+                    html.Div("Standard site visits come from the latest save for each hero. "
+                             "Colosseum of the Magi and Scholars remain manual.",
                              style={"fontSize": "12px", "opacity": 0.8}),
                 ], style={"maxWidth": "430px", "marginTop": "10px"}),
                 html.Div(id="map_stat_overview", style={"marginTop": "12px"}),
@@ -958,6 +988,7 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
             ], style={"flex": "1 1 720px", "minWidth": "360px"}),
             html.Div([
                 html.H3("Pins"),
+                html.Div(id="map_stat_visit_counts", style={"marginBottom": "12px"}),
                 html.Div(id="map_favourites_total", style={"fontWeight": "bold",
                                                              "marginBottom": "10px"}),
                 html.Div(id="map_pin_list", style={"maxHeight": "min(65vh, 800px)",
@@ -1031,7 +1062,7 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
             return html.Div("No current hero data available.")
         mask = latest_fog(rows, player, size, levels)[1]
         pins = visible_bonus_pins(bonus_provider() if bonus_provider else [], mask, player)
-        visited = visited_stat_sites(read_stat_visits(stat_visits_path), player, hero_name)
+        visited = hero_visits(player, hero_name)
         current, potential, by_type = stat_site_progress(hero, pins, visited)
         cards = [html.Div([
             html.Div(stat, style={"fontWeight": "bold"}),
@@ -1059,16 +1090,38 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
             ], style={"minWidth": "220px", "flex": "1 1 220px"}))
         return html.Div([
             html.H4(f"{hero_name}: primary stats", style={"margin": "0 0 6px"}),
-            html.Div("Current → possible max from discovered, unmarked sites",
+            html.Div("Current → possible max from discovered, unvisited sites",
                      style={"fontSize": "12px", "marginBottom": "8px"}),
             html.Div(cards, style={"display": "flex", "gap": "8px", "flexWrap": "wrap"}),
             html.H4("Visited sites by type", style={"margin": "12px 0 6px"}),
             html.Div(progress, style={"display": "flex", "gap": "10px 16px", "flexWrap": "wrap"})
             if progress else html.Div("No discovered stat or level sites yet."),
             html.Div("Choice-site ceilings are separate estimates; level requirements and fees "
-                     "are not checked. Unmarked visits are treated as available.",
+                     "are not checked. Manually tracked sites without a mark are treated as available.",
                      style={"fontSize": "12px", "opacity": 0.8, "marginTop": "8px"}),
         ])
+
+    @app.callback(Output("map_stat_visit_counts", "children"),
+                  Input("map_player", player_property), Input("map_stat_hero", "value"),
+                  Input("map_stat_revision", "data"), Input("map_data_revision", "data"))
+    def update_stat_visit_counts(player, hero_name, _stat_revision, _data_revision):
+        player = active_player(player)
+        if not hero_name:
+            return html.Div("Choose a hero to see visited stat sites.")
+        mask = latest_fog(current_data()[0], player, size, levels)[1]
+        pins = visible_bonus_pins(bonus_provider() if bonus_provider else [], mask, player)
+        visited = hero_visits(player, hero_name)
+        counts = defaultdict(int)
+        for pin in pins:
+            if pin["category"] == "Stat increase":
+                counts[pin["title"]] += int(stat_site_key(pin) in visited)
+        return html.Div([
+            html.H4(f"{hero_name}: visited stat sites", style={"margin": "0 0 6px"}),
+            html.Div("Discovered objects · object type — visited",
+                     style={"fontSize": "12px", "opacity": 0.8, "marginBottom": "6px"}),
+            html.Div([html.Div(f"{title} — {count}") for title, count in sorted(counts.items())])
+            if counts else html.Div("No discovered stat sites yet."),
+        ], style={"padding": "10px", "background": "#fffaf0", "borderRadius": "6px"})
 
     @app.callback(Output("map_stat_interest_enabled", "data"),
                   Input("map_stat_interest_toggle", "n_clicks"),
@@ -1282,8 +1335,9 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
 
     @app.callback(Output("map_stat_target", "children"),
                   Input("map_selected", "data"), Input("map_stat_hero", "value"),
-                  Input("map_stat_revision", "data"), State("map_player", player_property))
-    def stat_visit_target(selected, hero, _revision, player):
+                  Input("map_stat_revision", "data"), Input("map_data_revision", "data"),
+                  State("map_player", player_property))
+    def stat_visit_target(selected, hero, _revision, _data_revision, player):
         player = active_player(player)
         if not hero:
             return "Choose a hero, then select a discovered Stat increase or Level increase site."
@@ -1291,10 +1345,23 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
         mask = latest_fog(rows, player, size, levels)[1]
         site = selected_stat_pin(selected, current_pins(player, mask))
         if site is None:
-            return "Select a discovered Stat increase or Level increase site to change its visit status."
-        visited = stat_site_key(site) in visited_stat_sites(
-            read_stat_visits(stat_visits_path), player, hero)
-        return f"{site['title']} · {hero}: {'visited' if visited else 'unvisited'}"
+            return "Select a discovered Stat increase or Level increase site to see its visit status."
+        visited = stat_site_key(site) in hero_visits(player, hero)
+        source = ("manual" if manual_visit_site(site) or automatic_sites(player, hero) is None
+                  else "latest save")
+        return f"{site['title']} · {hero}: {'visited' if visited else 'unvisited'} ({source})"
+
+    @app.callback(Output("map_stat_visit_toggle", "disabled"),
+                  Output("map_stat_unvisit", "disabled"),
+                  Input("map_selected", "data"), Input("map_stat_hero", "value"),
+                  Input("map_data_revision", "data"), State("map_player", player_property))
+    def manual_visit_buttons(selected, hero, _data_revision, player):
+        player = active_player(player)
+        mask = latest_fog(current_data()[0], player, size, levels)[1]
+        site = selected_stat_pin(selected, current_pins(player, mask))
+        enabled = bool(hero and site and (manual_visit_site(site)
+                                          or automatic_sites(player, hero) is None))
+        return not enabled, not enabled
 
     @app.callback(Output("map_stat_revision", "data"), Output("map_stat_message", "children"),
                   Input("map_stat_visit_toggle", "n_clicks"),
@@ -1318,6 +1385,8 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
         site_pin = selected_stat_pin(selected, pins)
         if not hero or hero not in hero_names(rows, player) or site_pin is None:
             return no_update, "Select a discovered stat or level site and a current hero."
+        if automatic_sites(player, hero) is not None and not manual_visit_site(site_pin):
+            return no_update, f"{site_pin['title']} visits are tracked from the latest save."
         site = stat_site_key(site_pin)
         with _STAT_VISIT_LOCK:
             visits = read_stat_visits(stat_visits_path)
@@ -1445,7 +1514,7 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
                     favourites_revision, hidden_categories):
         player = active_player(player)
         day, mask = latest_fog(current_data()[0], player, size, levels)
-        visited = visited_stat_sites(read_stat_visits(stat_visits_path), player, hero) if hero else set()
+        visited = hero_visits(player, hero)
         return grouped_pin_list(current_pins(player, mask), hidden_categories, visited, hero)
 
     @app.callback(Output("map_hidden_categories", "data"),
@@ -1491,7 +1560,7 @@ def register_map_helper(app, df_players, game_info, input_dir, graphics_provider
                 and selected.get("category") in ("Creature", "Favourites")
                 and not any(pin["id"] == selected.get("id") for pin in pins)):
             selected = None
-        visited = visited_stat_sites(read_stat_visits(stat_visits_path), player, hero) if hero else set()
+        visited = hero_visits(player, hero)
         position, areas = interest_data(rows, player, hero, mask) if interest_enabled else (None, [])
         return map_figure(mask, day, player, level, pins,
                           selected, background, towns, hidden_categories, visited,

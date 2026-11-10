@@ -74,28 +74,31 @@ pins still come from the processed saves. Run
 - Open **Creature** to see level 1–7 subcategories. Each level has its own
   **Show on map** checkbox, so you can hide one level while keeping the others.
   All creature pins use the same color.
-- Choose a hero in **Track site visits for hero**. Click a discovered automatic
-  **Stat increase** or **Level increase** marker on the map to toggle its visited
-  status immediately. You can also select it from either category and use the **Mark visited**
-  or **Mark unvisited** button below the list. A status line names the target
-  site and shows whether that hero has marked it visited. If no eligible site is
-  selected, the buttons explain what to select. Marked sites have an open-circle pin and a visited label in the
-  list. **Hide objects already visited by this hero** removes those pins from
-  the map while leaving them in the list so you can select and unmark them.
-  Changing heroes shows that hero's own marked visits. Manual pins cannot be
-  marked visited.
+- Choose a hero in **Track site visits for hero**. Visits to Arenas, Marletto
+  Towers, Mercenary Camps, Star Axes, Gardens of Revelation, Libraries of
+  Enlightenment, Schools of Magic and War, and Trees of Knowledge are read
+  separately for each hero from the latest raw save. These visit buttons are
+  disabled for save-tracked sites. Colosseum of the Magi and named Scholars
+  still need manual marks: click their map marker to toggle a visit, or select
+  one from the pin list and use **Mark visited** or **Mark unvisited**. A status
+  line shows the selected site's status and whether it came from the save or a
+  manual mark. Visited sites have an open-circle pin and a label in the list.
+  **Hide objects already visited by this hero** hides their pins on the map
+  while leaving them in the list. Changing heroes shows that hero's own visits.
+  Manual pins cannot be marked visited.
 - The selected hero's **Primary stats** panel shows current values from the
   latest processed save and a possible maximum from discovered automatic stat
-  sites still unmarked for that hero. **Visited sites by type** shows
+  sites still unvisited for that hero. **Visited sites by type** shows
   visited/known counts and percentage bars for stat sites and Trees of Knowledge.
   Trees do not add to the primary-stat maximum. Both update after a visit is
-  marked or new processed save data is loaded. Sites offering a choice count
+  marked or new processed save data is loaded. The right sidebar also lists
+  each discovered stat-site type and its visited count. Sites offering a choice count
   toward each eligible stat's individual maximum; those maxima cannot all
   necessarily be reached together. Level requirements and fees are not
-  checked, and an unmarked visit is treated as available.
+  checked, and a manually tracked site without a mark is treated as available.
 - Select a hero and click **Stat area of interest: Off** to turn on ranked stat
   areas. The map draws rectangles around nearby groups of discovered stat sites
-  that are still unmarked for that hero; green is priority #1, blue marks later priorities,
+  that are still unvisited for that hero; green is priority #1, blue marks later priorities,
   and a white star marks the hero's latest saved position. The list above the
   map shows each area's nearest site, site count, possible combined gain for
   Attack, Defense, Power, and Knowledge separately, priority value, and
@@ -184,11 +187,13 @@ They are separate for each player and survive app restarts. Automatic pins are
 generated from the latest data and are not saved in that file.
 Creature favourites and their entered details are stored per player in
 `map_creature_favourites.json` in the same directory.
-Hero stat-site and Tree of Knowledge visits are stored in `map_stat_visits.json` in the
-same directory. These are **user-confirmed marks**: the processed saves do not
-contain a reliable per-hero visit history. An unmarked site means its visit
-status is unknown, not that the hero definitely has not visited it. New heroes
-appear in the dropdown when a new processed turn is loaded.
+The latest raw save supplies per-hero visit flags for the standard sites above.
+Map Helper needs the matched original map to link those flags to locations;
+undiscovered locations remain hidden. Colosseum of the Magi and Scholar marks
+are stored in `map_stat_visits.json` in the processed game's directory. Older
+manual marks for save-tracked sites are ignored while save data is available.
+If the raw save or matched map cannot be read, manual marks are used as a
+fallback. New heroes appear in the dropdown when a new processed turn is loaded.
 
 ## New turns and missing updates
 

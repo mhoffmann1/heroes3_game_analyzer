@@ -277,13 +277,23 @@ class GameGraphicsTests(unittest.TestCase):
                template(b"EVENT.DEF", 26) + struct.pack("<I", 3) +
                bytes((0, 0, 0)) + struct.pack("<I", 2) + bytes(5) +
                bytes((99, 98, 97, 96, 95)) +
-               bytes((0, 1, 0)) + struct.pack("<I", 0) + bytes(5) +
-               bytes((1, 1, 0)) + struct.pack("<I", 1) + bytes(5))
+               bytes((1, 1, 0)) + struct.pack("<I", 0) + bytes(5) +
+               bytes((0, 1, 0)) + struct.pack("<I", 1) + bytes(5))
         bonuses = parse_map_bonuses(raw, 0, 2, 1)
         self.assertEqual([(item["x"], item["y"], item["title"], item["category"])
                           for item in bonuses],
-                         [(0, 1, "Arena", "Stat increase"),
-                          (1, 1, "Rally Flag", "Morale and Luck")])
+                         [(1, 1, "Arena", "Stat increase"),
+                          (0, 1, "Rally Flag", "Morale and Luck")])
+
+    def test_arena_header_at_map_edge_is_rejected(self):
+        template = (struct.pack("<I", 9) + b"ARENA.DEF" + bytes(16) +
+                    struct.pack("<II", 4, 0) + bytes(18))
+        raw = (bytes(2 * 2 * 7) + struct.pack("<I", 1) + template +
+               struct.pack("<I", 2) +
+               bytes((0, 0, 0)) + struct.pack("<I", 0) + bytes(5) +
+               bytes((1, 1, 0)) + struct.pack("<I", 0) + bytes(5))
+        self.assertEqual([(item["x"], item["y"]) for item in
+                          parse_map_bonuses(raw, 0, 2, 1)], [(1, 1)])
 
     def test_primary_stat_scholar_is_pinned_but_spell_scholar_is_not(self):
         template = (struct.pack("<I", 11) + b"SCHOLAR.DEF" + bytes(16) +

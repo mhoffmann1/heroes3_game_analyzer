@@ -163,13 +163,14 @@ gold amounts and drops favourites when their stacks disappear from the save.
 The rendered map also shows game sprites for discovered towns, Obelisks, stat sites,
 Trees of Knowledge, and mana sites.
 Town pins come from processed saves. Covered tiles stay hidden.
-For stat sites and Trees of Knowledge, choose a hero, mark sites that hero has visited, and optionally
-hide marked sites on the map. These visit marks are saved in the processed game;
-the current save extraction does not identify per-hero site visits.
-Clicking a stat-site or Tree marker toggles its visit for the selected hero. Selecting a
-pin keeps the map viewport; **Show selected on map** centers it on demand.
+Choose a hero to see that hero's visits to standard stat sites and Trees of
+Knowledge from the latest raw save. Visited markers can be hidden on the map.
+Colosseum of the Magi and Scholar visits still require manual marks, saved in
+the processed game. Clicking one of those markers toggles its manual visit.
+Selecting a pin keeps the map viewport; **Show selected on map** centers it on demand.
 The selected hero's panel shows current primary stats, possible per-stat maxima
-from discovered unmarked sites, and visited percentages for each site type.
+from discovered unvisited sites, and visited percentages for each site type.
+The right sidebar lists visited counts for each discovered stat-site type.
 The **Stat area of interest** toggle draws ranked rectangles around clusters
 of discovered, unvisited stat sites from that hero's latest saved position.
 

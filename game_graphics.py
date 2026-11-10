@@ -382,6 +382,10 @@ def _find_template_objects(raw, start, templates, classes, size, levels):
             key = (x, y, level, object_class, subclass)
             if x >= size or y >= size or level >= levels or key in seen:
                 continue
+            # Arena anchors are at the lower-right of a multi-tile footprint.
+            # A header-shaped byte sequence at the top/left edge cannot be one.
+            if object_class == 4 and (x == 0 or y == 0):
+                continue
             seen.add(key)
             result.append({"x": x, "y": y, "level": level, "name": name,
                            "object_class": object_class, "subclass": subclass,
