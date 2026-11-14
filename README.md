@@ -111,6 +111,13 @@ to its colored exploration grid. The terrain and scenery come from the original
 map, so changes to map objects during play may not appear. The standalone Map
 Helper remains a separate app.
 
+In the dashboard's **Hero Metrics Over Time**, select **Army cost (gold)** to
+track each hero's army at the listed recruitment prices. **Player Metrics Over
+Time** offers **Total army cost (gold)**, which adds hero armies and town
+garrisons. Both metrics use the Gold portion of each unit's price in
+`unit_stats.json`; extra resources such as gems are excluded. Existing
+processed games can show these metrics from their stored army snapshots.
+
 To decompress single save for manual analysys:
 
 ```bash
