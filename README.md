@@ -104,10 +104,19 @@ same map level. Missing days and changes between Surface and Underground break
 the line. The lines show displacement between saves, not the route traveled
 during a turn; portals and Town Portal can make a line jump. The map expands to
 the dashboard width and scales its height with the map's aspect ratio.
+Hover over a hero marker to see that turn's location, A/D/P/K primary stats,
+and army stacks with their creature counts.
 When a matching map or assets are unavailable, the view falls back
 to its colored exploration grid. The terrain and scenery come from the original
 map, so changes to map objects during play may not appear. The standalone Map
 Helper remains a separate app.
+
+In the dashboard's **Hero Metrics Over Time**, select **Army cost (gold)** to
+track each hero's army at the listed recruitment prices. **Player Metrics Over
+Time** offers **Total army cost (gold)**, which adds hero armies and town
+garrisons. Both metrics use the Gold portion of each unit's price in
+`unit_stats.json`; extra resources such as gems are excluded. Existing
+processed games can show these metrics from their stored army snapshots.
 
 To decompress single save for manual analysys:
 
@@ -161,13 +170,14 @@ gold amounts and drops favourites when their stacks disappear from the save.
 The rendered map also shows game sprites for discovered towns, Obelisks, stat sites,
 Trees of Knowledge, and mana sites.
 Town pins come from processed saves. Covered tiles stay hidden.
-For stat sites and Trees of Knowledge, choose a hero, mark sites that hero has visited, and optionally
-hide marked sites on the map. These visit marks are saved in the processed game;
-the current save extraction does not identify per-hero site visits.
-Clicking a stat-site or Tree marker toggles its visit for the selected hero. Selecting a
-pin keeps the map viewport; **Show selected on map** centers it on demand.
+Choose a hero to see that hero's visits to standard stat sites and Trees of
+Knowledge from the latest raw save. Visited markers can be hidden on the map.
+Colosseum of the Magi and Scholar visits still require manual marks, saved in
+the processed game. Clicking one of those markers toggles its manual visit.
+Selecting a pin keeps the map viewport; **Show selected on map** centers it on demand.
 The selected hero's panel shows current primary stats, possible per-stat maxima
-from discovered unmarked sites, and visited percentages for each site type.
+from discovered unvisited sites, and visited percentages for each site type.
+The right sidebar lists visited counts for each discovered stat-site type.
 The **Stat area of interest** toggle draws ranked rectangles around clusters
 of discovered, unvisited stat sites from that hero's latest saved position.
 

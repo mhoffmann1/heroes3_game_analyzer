@@ -9,11 +9,50 @@ from dashboard import (
     build_player_army_composition,
     build_player_power_scores,
     build_player_summary_rankings,
+    calculate_army_cost_gold,
+    calculate_player_army_cost_gold,
     calculate_hybrid_metric_scores,
     format_game_info_value,
     get_achievement_definitions,
     get_top_heroes_by_army_strength,
+    parse_data,
+    unit_gold_costs,
 )
+
+
+class ArmyCostMetricsTests(unittest.TestCase):
+    def test_gold_cost_ignores_other_resources_and_includes_garrisons(self):
+        costs = unit_gold_costs()
+        self.assertEqual(costs["Archangel"], 5000)  # The listed 3 gems are excluded.
+        heroes = [{"army": [{"name": "Pikeman", "count": 2},
+                             {"name": "Archangel", "count": 1}]},
+                  {"army": [{"name": "Archer", "count": 3}]}]
+        towns = [{"garrison": [{"name": "Halberdier", "count": 4}]}]
+        self.assertEqual(calculate_army_cost_gold(heroes[0]["army"], costs), 5120)
+        self.assertEqual(calculate_player_army_cost_gold(heroes, towns, costs), 5720)
+        self.assertIsNone(calculate_army_cost_gold(
+            [{"name": "Unknown creature", "count": 1}], costs))
+
+    def test_historical_snapshots_get_hero_and_player_costs(self):
+        def snapshot(filename, pikemen, halberdiers):
+            return {
+                "filename": filename, "savetime": 1, "game_info": {"map_size": 2},
+                "utopias": {}, "players": {"Blue": {
+                    "heroes": [{"name": "Solmyr", "army": [
+                        {"name": "Pikeman", "count": pikemen},
+                        {"name": "Archangel", "count": 1}],
+                        "primary_skills": {"attack": 1, "defense": 1,
+                                           "spell_power": 1, "knowledge": 1}}],
+                    "towns": [{"name": "Bluehold", "garrison": [
+                        {"name": "Halberdier", "count": halberdiers}]}],
+                }},
+            }
+
+        heroes, _, _, players, _, _, _ = parse_data([
+            snapshot("111.GM1", 2, 4), snapshot("112.GM1", 3, 2)
+        ])
+        self.assertEqual(heroes["army_cost_gold"].tolist(), [5120, 5180])
+        self.assertEqual(players["total_army_cost_gold"].tolist(), [5420, 5330])
 
 
 class HeroArtifactsToggleTests(unittest.TestCase):
@@ -44,6 +83,14 @@ class HeroArtifactsToggleTests(unittest.TestCase):
             return None
 
         app = captured["app"]
+        self.assertIn(
+            {"label": "Army cost (gold)", "value": "army_cost_gold"},
+            find_component(app.layout, "metric_selector").options,
+        )
+        self.assertIn(
+            {"label": "Total army cost (gold)", "value": "total_army_cost_gold"},
+            find_component(app.layout, "player_metric_selector").options,
+        )
         self.assertEqual(find_component(app.layout, "toggle_hero_artifacts").value, [])
         self.assertEqual(find_component(app.layout, "hero_artifacts_container").style,
                          {"display": "none"})

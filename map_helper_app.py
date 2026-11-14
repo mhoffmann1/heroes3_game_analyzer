@@ -14,6 +14,7 @@ from dash import html
 from map_helper import register_map_helper
 from game_graphics import active_map_creatures, load_terrain_renderer
 from h3tools.metadata import Savefile
+from hero_visits import visited_object_sites
 
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,36 @@ def create_app(directory, *, player, game_dir=None, graphics=True):
     cache_lock = threading.Lock()
     creature_cache = {"signature": None, "items": getattr(renderer, "creatures", [])}
     creature_lock = threading.Lock()
+    visit_cache = {"signature": None, "players": None}
+    visit_lock = threading.Lock()
+
+    def hero_visit_provider():
+        if renderer is None:
+            return None
+        if not (directory / ".incremental_state.json").is_file():
+            return None
+        with visit_lock:
+            try:
+                state = json.loads((directory / ".incremental_state.json").read_text(encoding="utf-8"))
+                save_path = Path(state["source_directory"]) / state["saves"][-1]["filename"]
+                stat = save_path.stat()
+                signature = (str(save_path), stat.st_mtime_ns, stat.st_size)
+                if signature != visit_cache["signature"]:
+                    save = Savefile(str(save_path), parse_heroes=False)
+                    if (int(save.mapdata["size"]) != int(game_info["map_size"])
+                            or int(save.mapdata["levels"]) != int(game_info.get("levels") or 1)):
+                        raise ValueError("Visit save map dimensions do not match")
+                    save.populate_heroes()
+                    players = {}
+                    for hero in save.heroes:
+                        if hero.owner in save.owner_colors.values():
+                            players.setdefault(hero.owner, {})[hero.name] = visited_object_sites(
+                                hero.bytes, renderer.bonuses)
+                    visit_cache.update(signature=signature, players=players)
+            except (OSError, EOFError, ValueError, KeyError, IndexError, TypeError) as exc:
+                logger.warning("Hero visit refresh deferred: %s", exc)
+                return None
+            return visit_cache["players"]
 
     def creature_provider():
         if renderer is None or not hasattr(renderer, "creature_templates"):
@@ -172,6 +203,7 @@ def create_app(directory, *, player, game_dir=None, graphics=True):
                                       utopia_provider=(lambda: renderer.utopias) if renderer else None,
                                       obelisk_provider=(lambda: getattr(renderer, "obelisks", [])) if renderer else None,
                                       creature_provider=creature_provider if renderer else None,
+                                      hero_visit_provider=hero_visit_provider,
                                       default_player=player, data_provider=data.get,
                                       refresh_interval_ms=5000, lock_player=True),
                   style={"width": "100%", "boxSizing": "border-box", "margin": "0 auto",

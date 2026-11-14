@@ -6,6 +6,8 @@ import os
 import re
 import uuid
 from collections import defaultdict
+from functools import lru_cache
+from pathlib import Path
 
 import dash
 import numpy as np
@@ -32,6 +34,8 @@ MINE_METRICS = [
     "gold_mines",
 ]
 METRIC_LABELS = {
+    "army_cost_gold": "Army cost (gold)",
+    "total_army_cost_gold": "Total army cost (gold)",
     "sawmills": "Sawmills",
     "ore_pits": "Ore pits",
     "alchemists_labs": "Alchemist's labs",
@@ -44,6 +48,50 @@ METRIC_LABELS = {
 
 def metric_label(metric):
     return METRIC_LABELS.get(metric, metric.replace("_", " ").capitalize())
+
+
+@lru_cache(maxsize=1)
+def unit_gold_costs():
+    """Load the gold part of each creature's recruitment price."""
+    with (Path(__file__).resolve().parent / "unit_stats.json").open(encoding="utf-8") as source:
+        units = json.load(source)["units"]
+    costs = {}
+    for unit in units:
+        match = re.search(r"\b([\d,]+)\s+Gold\b", unit["Cost"], re.IGNORECASE)
+        if match is None:
+            raise ValueError(f"No Gold recruitment cost for {unit['Name']}")
+        costs[unit["Name"]] = int(match.group(1).replace(",", ""))
+    return costs
+
+
+def calculate_army_cost_gold(army, costs):
+    """Sum a roster's gold recruitment value; unknown units leave a gap."""
+    total = 0
+    for stack in army or []:
+        if not isinstance(stack, dict):
+            return None
+        try:
+            count = int(stack.get("count", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if count < 0:
+            return None
+        if not count:
+            continue
+        unit_cost = costs.get(stack.get("name"))
+        if unit_cost is None:
+            return None
+        total += count * unit_cost
+    return total
+
+
+def calculate_player_army_cost_gold(heroes, towns, costs):
+    """Include armies carried by heroes and stationed in town garrisons."""
+    hero_data = heroes.values() if isinstance(heroes, dict) else heroes or []
+    armies = [hero.get("army") for hero in hero_data]
+    armies.extend(town.get("garrison") for town in towns or [])
+    values = [calculate_army_cost_gold(army, costs) for army in armies]
+    return sum(values) if all(value is not None for value in values) else None
 
 
 def normalize_unit_tier(level):
@@ -231,6 +279,7 @@ def load_combined_data(directory):
     return data
 
 def parse_data(data):
+    costs = unit_gold_costs()
     hero_rows = []
     town_rows = []
     player_rows = []
@@ -272,7 +321,7 @@ def parse_data(data):
             if isinstance(heroes, list):
                 for hero_data in heroes:
                     hero_name = hero_data.get("name", "Unknown")
-                    hero = create_hero_entry(hero_name, hero_data, player_color.capitalize(), day)
+                    hero = create_hero_entry(hero_name, hero_data, player_color.capitalize(), day, costs)
                     hero["snapshot_index"] = snapshot_index
                     # Section for collecting hero army level stats
                     hero_army_levels_entry = {
@@ -289,7 +338,7 @@ def parse_data(data):
 
             elif isinstance(heroes, dict):
                 for hero_name, hero_data in heroes.items():
-                    hero = create_hero_entry(hero_name, hero_data, player_color.capitalize(), day)
+                    hero = create_hero_entry(hero_name, hero_data, player_color.capitalize(), day, costs)
                     hero["snapshot_index"] = snapshot_index
 
                     # Section for collecting hero army level stats
@@ -353,6 +402,7 @@ def parse_data(data):
                 "total_hero_army_strength": player_data.get("heroes_strength", 0),
                 "total_garrison_army_strength": player_data.get("garrison_strength", 0),
                 "total_army_strength": player_data.get("total_strength", 0),
+                "total_army_cost_gold": calculate_player_army_cost_gold(heroes, towns, costs),
                 "total_army_hitpoints": player_data.get("total_hitpoints", 0),
                 "tiles_explored": player_data.get("tiles_explored", 0),
                 "fog_of_war": player_data.get("fog_of_war",'')
@@ -379,7 +429,7 @@ def parse_data(data):
 
     return df_heroes, df_heroes_army_levels, df_towns_army_levels, df_players, game_info, df_turntime, df_utopias
 
-def create_hero_entry(hero_name, hero_data, player_color, day):
+def create_hero_entry(hero_name, hero_data, player_color, day, gold_costs=None):
     artifacts = hero_data.get("artifacts", {}) or {}
     hero = {
         "day": day,
@@ -389,7 +439,12 @@ def create_hero_entry(hero_name, hero_data, player_color, day):
         "level": hero_data.get("level", 0),
         "experience": hero_data.get("experience", 0),
         "army_strength": hero_data.get("army_strength", 0),
+        "army_cost_gold": calculate_army_cost_gold(
+            hero_data.get("army"), gold_costs if gold_costs is not None else unit_gold_costs()
+        ),
         "army_hitpoints": hero_data.get("army_hitpoints",0),
+        "army": [{"name": unit.get("name"), "count": unit.get("count")}
+                 for unit in hero_data.get("army", []) or [] if isinstance(unit, dict)],
         "attack": hero_data.get("primary_skills", {}).get("attack", 0),
         "defense": hero_data.get("primary_skills", {}).get("defense", 0),
         "power": hero_data.get("primary_skills", {}).get("spell_power", 0),
@@ -1370,8 +1425,9 @@ def run_dashboard(
         for key in ("total_towns", "total_utopias")
         if key in game_info
     ]
-    metric_options = ["experience", "army_strength", "army_hitpoints", "attack", "defense", "power", "knowledge"]
-    player_metric_options = ["gold", "town_count", "total_army_strength", "total_hero_army_strength", 
+    metric_options = ["experience", "army_strength", "army_cost_gold", "army_hitpoints", "attack", "defense", "power", "knowledge"]
+    player_metric_options = ["gold", "town_count", "total_army_strength", "total_army_cost_gold",
+                             "total_hero_army_strength",
                              "total_garrison_army_strength", "total_army_hitpoints", "visited_utopias",
                              "visited_obelisks", "tiles_explored", "wood", "ore", "mercury", "sulfur",
                              "crystal", "gems", *MINE_METRICS]
@@ -1506,7 +1562,7 @@ def run_dashboard(
             html.Label("Select Hero Metrics"),
             dcc.Dropdown(
                 id="metric_selector",
-                options=[{"label": m.capitalize(), "value": m} for m in metric_options],
+                options=[{"label": metric_label(m), "value": m} for m in metric_options],
                 value=["experience"],
                 multi=True
             ),
@@ -1904,19 +1960,19 @@ def run_dashboard(
         for metric in selected_metrics:
             for (player, hero), group in filtered.groupby(["player_color", "hero_name"]):
                 player_color = PLAYER_COLORS.get(player, "#808080")
-                metric_label = metric.replace("_", " ").title()
+                label = metric_label(metric)
                 fig.add_trace(go.Scatter(
                     x=group["day"],
                     y=group[metric],
                     mode="lines+markers",
-                    name=f"{hero} ({player}) - {metric.capitalize()}",
+                    name=f"{hero} ({player}) - {label}",
                     line={"color": player_color},
                     marker={"color": player_color},
                     hovertemplate=(
                         f"<b>{hero}</b><br>"
                         f"Player: {player}<br>"
                         "Day: %{x}<br>"
-                        f"{metric_label}: %{{y:,}}"
+                        f"{label}: %{{y:,}}"
                         "<extra></extra>"
                     ),
                 ))

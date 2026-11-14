@@ -16,6 +16,43 @@ from map_helper_app import ProcessedGameData, create_app, day_from_save_name, lo
 
 
 class StandaloneMapHelperTests(unittest.TestCase):
+    def test_save_tracked_hero_visits_drive_sidebar_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rows = pd.DataFrame([{
+                "day": 1, "player_color": "Blue", "fog_of_war": "1" * 9,
+                "hero_summary": ["Aislinn", "Dracon"],
+                "hero_details": [{"name": "Aislinn", "primary_skills": {}},
+                                 {"name": "Dracon", "primary_skills": {}}],
+            }])
+            bonuses = [
+                {"level": 0, "x": 1, "y": 1, "title": "Arena", "category": "Stat increase"},
+                {"level": 0, "x": 2, "y": 2, "title": "Colosseum of the Magi",
+                 "category": "Stat increase"},
+            ]
+            app = Dash(__name__)
+            app.layout = register_map_helper(
+                app, rows, {"map_size": 3, "levels": 1}, directory,
+                default_player="Blue", lock_player=True, bonus_provider=lambda: bonuses,
+                hero_visit_provider=lambda: {"Blue": {"Aislinn": {"0:1:1"},
+                                                      "Dracon": set()}})
+            client = app.server.test_client()
+            for hero, expected in (("Aislinn", "Arena — 1"), ("Dracon", "Arena — 0")):
+                response = client.post("/_dash-update-component", json={
+                    "output": "map_stat_visit_counts.children",
+                    "outputs": {"id": "map_stat_visit_counts", "property": "children"},
+                    "inputs": [
+                        {"id": "map_player", "property": "data", "value": "Blue"},
+                        {"id": "map_stat_hero", "property": "value", "value": hero},
+                        {"id": "map_stat_revision", "property": "data", "value": 0},
+                        {"id": "map_data_revision", "property": "data", "value": 0},
+                    ],
+                    "state": [], "changedPropIds": ["map_stat_hero.value"],
+                })
+                self.assertEqual(response.status_code, 200)
+                content = json.dumps(response.json["response"], ensure_ascii=False)
+                self.assertIn(expected, content)
+                self.assertIn("Colosseum of the Magi — 0", content)
+
     def test_creature_favourites_edit_total_and_disappearance(self):
         with tempfile.TemporaryDirectory() as directory:
             creatures = [
@@ -335,15 +372,16 @@ class StandaloneMapHelperTests(unittest.TestCase):
                     "outputs": {"id": "map_stat_target", "property": "children"},
                     "inputs": [{"id": "map_selected", "property": "data", "value": site},
                                {"id": "map_stat_hero", "property": "value", "value": hero},
-                               {"id": "map_stat_revision", "property": "data", "value": 3}],
+                               {"id": "map_stat_revision", "property": "data", "value": 3},
+                               {"id": "map_data_revision", "property": "data", "value": 0}],
                     "state": [{"id": "map_player", "property": "data", "value": "Blue"}],
                     "changedPropIds": ["map_stat_revision.data"],
                 })
                 self.assertEqual(response.status_code, 200)
                 return response.json["response"]["map_stat_target"]["children"]
 
-            self.assertEqual(target_status("Aislinn"), "Arena · Aislinn: unvisited")
-            self.assertEqual(target_status("Dracon"), "Arena · Dracon: visited")
+            self.assertEqual(target_status("Aislinn"), "Arena · Aislinn: unvisited (manual)")
+            self.assertEqual(target_status("Dracon"), "Arena · Dracon: visited (manual)")
             self.assertIn("Select a discovered", target_status("Aislinn", None))
             self.assertIn("Choose a hero", target_status(None))
             self.assertIn("Select a discovered stat or level site",
@@ -429,13 +467,13 @@ class StandaloneMapHelperTests(unittest.TestCase):
             self.assertIn("visited", toggle("Aislinn", 3, use_map=True, site=tree)
                           ["map_stat_message"]["children"])
             self.assertEqual(target_status("Aislinn", tree),
-                             "Tree of Knowledge · Aislinn: visited")
+                             "Tree of Knowledge · Aislinn: visited (manual)")
             self.assertEqual(target_status("Dracon", tree),
-                             "Tree of Knowledge · Dracon: unvisited")
+                             "Tree of Knowledge · Dracon: unvisited (manual)")
             self.assertIn("unvisited", toggle("Aislinn", 4, unvisit=True, site=tree)
                           ["map_stat_message"]["children"])
             self.assertEqual(target_status("Aislinn", tree),
-                             "Tree of Knowledge · Aislinn: unvisited")
+                             "Tree of Knowledge · Aislinn: unvisited (manual)")
 
     def test_category_toggle_updates_session_visibility(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -509,7 +547,7 @@ class StandaloneMapHelperTests(unittest.TestCase):
             response = app.server.test_client().get("/_dash-layout")
             self.assertEqual(response.status_code, 200)
             self.assertIn(b"map_helper_graph", response.data)
-            self.assertEqual(len(app.callback_map), 17)
+            self.assertEqual(len(app.callback_map), 19)
             class FakeRenderer:
                 transports = [
                     {"level": 0, "x": 0, "y": 0, "title": "Blue Two-way Portal", "category": "Portal"},
